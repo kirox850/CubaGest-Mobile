@@ -23,7 +23,16 @@ jobs:
         run: npx expo install --fix
 
       - name: Prebuild native iOS project
-        run: npx expo prebuild --platform ios --no-install
+        run: npx expo prebuild --platform ios --no-install --clean
+
+      - name: Verify splash and assets exist
+        run: |
+          echo "--- Storyboard ---"
+          ls -la ios/CubaGest/SplashScreen.storyboard || echo "❌ SplashScreen.storyboard no encontrado"
+          echo "--- Assets ---"
+          ls -la ios/CubaGest/Images.xcassets/ || echo "❌ Images.xcassets no encontrado"
+          echo "--- App icon ---"
+          ls -la ios/CubaGest/Images.xcassets/AppIcon.appiconset/ || echo "❌ AppIcon no encontrado"
 
       - name: Cache CocoaPods
         uses: actions/cache@v4
@@ -43,10 +52,13 @@ jobs:
           SCHEME=$(basename "$WORKSPACE" .xcworkspace)
           echo "workspace=$WORKSPACE" >> $GITHUB_OUTPUT
           echo "scheme=$SCHEME" >> $GITHUB_OUTPUT
-          echo "Workspace: $WORKSPACE | Scheme: $SCHEME"
+          echo "✅ Workspace: $WORKSPACE | Scheme: $SCHEME"
+          xcodebuild -workspace "$WORKSPACE" -list 2>&1 || true
 
       - name: Archive (unsigned)
+        shell: bash
         run: |
+          set -o pipefail
           xcodebuild -workspace "${{ steps.find.outputs.workspace }}" \
             -scheme "${{ steps.find.outputs.scheme }}" \
             -configuration Release \
@@ -58,12 +70,11 @@ jobs:
             PROVISIONING_PROFILE="" \
             AD_HOC_CODE_SIGNING_ALLOWED=YES \
             ONLY_ACTIVE_ARCH=NO \
+            ASSETCATALOG_COMPILER_APPICON_NAME=AppIcon \
             archive 2>&1 | tee build.log
-          echo "--- Exit code: $? ---"
-          echo "--- Contenido de build/: ---"
           ls -la build/ || echo "build/ no existe"
 
-      - name: Show build log on failure
+      - name: Show build log tail on failure
         if: failure()
         run: tail -n 100 build.log || echo "No se encontró build.log"
 
