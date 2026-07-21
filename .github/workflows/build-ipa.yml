@@ -28,14 +28,10 @@ jobs:
       - name: Remove SplashScreen storyboard from Xcode project
         run: |
           cd ios
-          # Eliminar referencia al storyboard en el .pbxproj
           sed -i '' '/SplashScreen\.storyboard/d' CubaGest.xcodeproj/project.pbxproj
-          # Eliminar el archivo físico
           rm -f CubaGest/SplashScreen.storyboard
-          # Eliminar UILaunchStoryboardName del Info.plist si existe
           /usr/libexec/PlistBuddy -c "Delete :UILaunchStoryboardName" CubaGest/Info.plist 2>/dev/null || true
-          echo "✅ SplashScreen eliminado del proyecto"
-          grep -c "SplashScreen" CubaGest.xcodeproj/project.pbxproj && echo "⚠ Aún hay referencias" || echo "✅ Sin referencias residuales"
+          echo "✅ SplashScreen eliminado"
 
       - name: Clear Xcode DerivedData
         run: rm -rf ~/Library/Developer/Xcode/DerivedData
@@ -76,6 +72,8 @@ jobs:
             AD_HOC_CODE_SIGNING_ALLOWED=YES \
             ONLY_ACTIVE_ARCH=NO \
             IPHONEOS_DEPLOYMENT_TARGET=16.0 \
+            ASSETCATALOG_COMPILER_SKIP_APP_STORE_DEPLOYMENT=YES \
+            EXCLUDED_ARCHS[sdk=iphonesimulator*]=arm64 \
             archive 2>&1 | tee build.log
           ls -la build/ || echo "build/ no existe"
 
