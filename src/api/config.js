@@ -4,4 +4,4 @@
 //   (NUNCA "localhost", el celular no sabe qué es "localhost" en tu compu).
 // - Cuando tengas el backend desplegado en Railway/Cloudflare, usa esa URL,
 //   ej: "https://api.tunegocio.com/api"
-export const API_BASE_URL = "http://192.168.1.50:4000/api";
+export const API_BASE_URL = "https://cubagest-backend-production.up.railway.app/api";
