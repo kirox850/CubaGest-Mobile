@@ -11,7 +11,8 @@
     "assetBundlePatterns": ["**/*"],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "cu.cubagest.mobile"
+      "bundleIdentifier": "cu.cubagest.mobile",
+      "deploymentTarget": "16.0"
     },
     "android": {
       "package": "cu.cubagest.mobile"
