@@ -12,6 +12,11 @@ jobs:
       - name: Select Xcode 16.2
         run: sudo xcode-select -s /Applications/Xcode_16.2.app/Contents/Developer
 
+      - name: Install iOS 18.2 platform
+        run: |
+          xcodebuild -downloadPlatform iOS
+          xcrun simctl list runtimes | grep iOS || true
+
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -24,15 +29,6 @@ jobs:
 
       - name: Prebuild native iOS project
         run: npx expo prebuild --platform ios --no-install --clean
-
-      - name: Verify splash and assets exist
-        run: |
-          echo "--- Storyboard ---"
-          ls -la ios/CubaGest/SplashScreen.storyboard || echo "❌ SplashScreen.storyboard no encontrado"
-          echo "--- Assets ---"
-          ls -la ios/CubaGest/Images.xcassets/ || echo "❌ Images.xcassets no encontrado"
-          echo "--- App icon ---"
-          ls -la ios/CubaGest/Images.xcassets/AppIcon.appiconset/ || echo "❌ AppIcon no encontrado"
 
       - name: Cache CocoaPods
         uses: actions/cache@v4
@@ -53,7 +49,6 @@ jobs:
           echo "workspace=$WORKSPACE" >> $GITHUB_OUTPUT
           echo "scheme=$SCHEME" >> $GITHUB_OUTPUT
           echo "✅ Workspace: $WORKSPACE | Scheme: $SCHEME"
-          xcodebuild -workspace "$WORKSPACE" -list 2>&1 || true
 
       - name: Archive (unsigned)
         shell: bash
@@ -70,7 +65,6 @@ jobs:
             PROVISIONING_PROFILE="" \
             AD_HOC_CODE_SIGNING_ALLOWED=YES \
             ONLY_ACTIVE_ARCH=NO \
-            ASSETCATALOG_COMPILER_APPICON_NAME=AppIcon \
             archive 2>&1 | tee build.log
           ls -la build/ || echo "build/ no existe"
 
