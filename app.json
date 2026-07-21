@@ -1,0 +1,20 @@
+{
+  "expo": {
+    "name": "CubaGest",
+    "slug": "cubagest-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "backgroundColor": "#1a0a05"
+    },
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "cu.cubagest.mobile"
+    },
+    "android": {
+      "package": "cu.cubagest.mobile"
+    }
+  }
+}
