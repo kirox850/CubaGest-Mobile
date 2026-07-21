@@ -12,11 +12,6 @@ jobs:
       - name: Select Xcode 16.2
         run: sudo xcode-select -s /Applications/Xcode_16.2.app/Contents/Developer
 
-      - name: Install iOS 18.2 platform
-        run: |
-          xcodebuild -downloadPlatform iOS
-          xcrun simctl list runtimes | grep iOS || true
-
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -65,6 +60,7 @@ jobs:
             PROVISIONING_PROFILE="" \
             AD_HOC_CODE_SIGNING_ALLOWED=YES \
             ONLY_ACTIVE_ARCH=NO \
+            IPHONEOS_DEPLOYMENT_TARGET=16.0 \
             archive 2>&1 | tee build.log
           ls -la build/ || echo "build/ no existe"
 
