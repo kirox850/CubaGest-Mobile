@@ -55,8 +55,13 @@ jobs:
               </scenes>
           </document>
           EOF
-          echo "✅ SplashScreen.storyboard reemplazado"
-          head -3 ios/CubaGest/SplashScreen.storyboard
+          echo "✅ Storyboard reemplazado"
+          cat ios/CubaGest/SplashScreen.storyboard | head -5
+
+      - name: Clear Xcode DerivedData
+        run: |
+          rm -rf ~/Library/Developer/Xcode/DerivedData
+          echo "✅ DerivedData limpiado"
 
       - name: Cache CocoaPods
         uses: actions/cache@v4
