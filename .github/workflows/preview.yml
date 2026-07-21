@@ -29,4 +29,4 @@ jobs:
       - name: Publish Update to Preview
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-        run: npx eas update --channel preview --non-interactive
+        run: npx eas update --channel preview --message "Preview update from GitHub" --non-interactive
