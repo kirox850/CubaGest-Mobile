@@ -25,6 +25,14 @@ jobs:
       - name: Prebuild native iOS project
         run: npx expo prebuild --platform ios --no-install
 
+      - name: Cache CocoaPods
+        uses: actions/cache@v4
+        with:
+          path: ios/Pods
+          key: pods-${{ hashFiles('ios/Podfile.lock') }}
+          restore-keys: |
+            pods-
+
       - name: Install CocoaPods
         run: cd ios && pod install
 
@@ -32,9 +40,10 @@ jobs:
         id: find
         run: |
           WORKSPACE=$(find ios -maxdepth 1 -name "*.xcworkspace" | head -n 1)
-          SCHEME=$(xcodebuild -workspace "$WORKSPACE" -list | awk '/Schemes:/{flag=1;next}flag && NF{print;exit}' | xargs)
+          SCHEME=$(basename "$WORKSPACE" .xcworkspace)
           echo "workspace=$WORKSPACE" >> $GITHUB_OUTPUT
           echo "scheme=$SCHEME" >> $GITHUB_OUTPUT
+          echo "Workspace: $WORKSPACE | Scheme: $SCHEME"
 
       - name: Archive (unsigned)
         run: |
@@ -46,13 +55,24 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            archive
+            PROVISIONING_PROFILE="" \
+            AD_HOC_CODE_SIGNING_ALLOWED=YES \
+            archive 2>&1 | tee build.log
+
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
 
       - name: Package unsigned IPA
         run: |
+          APP_PATH=$(find build/App.xcarchive -name "*.app" | head -n 1)
+          echo "Found app: $APP_PATH"
           mkdir -p build/Payload
-          cp -r build/App.xcarchive/Products/Applications/*.app build/Payload/
-          cd build && zip -r ../CubaGest-unsigned.ipa Payload
+          cp -r "$APP_PATH" build/Payload/
+          cd build && zip -r ../CubaGest-unsigned.ipa Payload/
 
       - uses: actions/upload-artifact@v4
         with:
