@@ -18,7 +18,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: 'npm'
 
       - name: Install dependencies
@@ -30,10 +30,5 @@ jobs:
           eas-version: latest
           token: ${{ secrets.EXPO_TOKEN }}
 
-      - name: Publish Update to Preview Channel
+      - name: Publish Update (Preview Channel)
         run: npx eas update --channel preview --non-interactive
-
-      - name: Generate QR Code Comment
-        uses: expo/expo-github-action/preview@v8
-        with:
-          command: eas update --channel preview --non-interactive
