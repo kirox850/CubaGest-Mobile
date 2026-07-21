@@ -1,6 +1,7 @@
 import { apiFetch } from "./client";
 
 export const AuthAPI = {
+  register: (data) => apiFetch("/auth/register", { method: "POST", body: data, auth: false }),
   login: (email, password) => apiFetch("/auth/login", { method: "POST", body: { email, password }, auth: false }),
   me: () => apiFetch("/auth/me"),
 };
