@@ -1,0 +1,39 @@
+name: Expo Preview QR
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  preview:
+    name: Generate Expo Preview
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Setup Expo and EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Publish Update to Preview Channel
+        run: npx eas update --channel preview --non-interactive
+
+      - name: Generate QR Code Comment
+        uses: expo/expo-github-action/preview@v8
+        with:
+          command: eas update --channel preview --non-interactive
