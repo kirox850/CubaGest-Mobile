@@ -25,6 +25,24 @@ jobs:
       - name: Prebuild native iOS project
         run: npx expo prebuild --platform ios --no-install --clean
 
+      - name: Patch SplashScreen storyboard iOS version
+        run: |
+          STORYBOARD="ios/CubaGest/SplashScreen.storyboard"
+          echo "--- Before patch ---"
+          grep -E "(targetRuntime|systemVersion|document)" "$STORYBOARD" | head -5
+          # Reemplaza la versión del document a 16.0
+          sed -i '' \
+            's/targetRuntime="AppleSDK"/targetRuntime="AppleSDK"/g' \
+            "$STORYBOARD"
+          sed -i '' \
+            's/systemVersion="[0-9.]*"/systemVersion="16.0"/g' \
+            "$STORYBOARD"
+          sed -i '' \
+            's/toolsVersion="[0-9.]*"/toolsVersion="21507"/g' \
+            "$STORYBOARD"
+          echo "--- After patch ---"
+          grep -E "(targetRuntime|systemVersion|document)" "$STORYBOARD" | head -5
+
       - name: Cache CocoaPods
         uses: actions/cache@v4
         with:
