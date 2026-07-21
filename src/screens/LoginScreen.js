@@ -4,7 +4,7 @@ import { useAuth } from "../context/AuthContext";
 import { colors } from "../config/theme";
 import { ErrorBanner } from "../components/UI";
 
-export default function LoginScreen() {
+export default function LoginScreen({ onGoToRegister }) {
   const { login } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -58,6 +58,10 @@ export default function LoginScreen() {
           <TouchableOpacity style={styles.button} onPress={handleLogin} disabled={loading}>
             {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Iniciar sesión</Text>}
           </TouchableOpacity>
+
+          <TouchableOpacity style={styles.linkBtn} onPress={onGoToRegister}>
+            <Text style={styles.linkText}>Crear mi negocio (primera vez)</Text>
+          </TouchableOpacity>
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -76,4 +80,6 @@ const styles = StyleSheet.create({
   input: { borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15, backgroundColor: colors.bg },
   button: { backgroundColor: colors.primary, borderRadius: 8, paddingVertical: 13, alignItems: "center", marginTop: 22 },
   buttonText: { color: "#fff", fontWeight: "700", fontSize: 15 },
+  linkBtn: { marginTop: 14, alignItems: "center" },
+  linkText: { color: colors.primary, fontSize: 13, fontWeight: "600" },
 });
