@@ -15,8 +15,17 @@ import UsuariosScreen from "../screens/UsuariosScreen";
 
 const Tab = createBottomTabNavigator();
 
-// Un módulo = una pestaña. Solo se muestran las que el rol del usuario
-// tiene permitidas (mismo mapeo que backend y frontend web).
+// Emojis como íconos hasta que se integre una librería de íconos.
+// Reemplazar por <Ionicons> u otra librería cuando esté disponible.
+const TAB_ICONS = {
+  dashboard: "🏠",
+  pos: "🛒",
+  inventario: "📦",
+  facturacion: "🧾",
+  contabilidad: "💰",
+  usuarios: "👥",
+};
+
 const ALL_TABS = [
   { key: "dashboard", label: "Inicio", component: DashboardScreen },
   { key: "pos", label: "Vender", component: POSScreen },
@@ -35,7 +44,12 @@ function LogoutButton() {
     ]);
   };
   return (
-    <TouchableOpacity onPress={confirmLogout} style={{ marginRight: 14 }}>
+    <TouchableOpacity
+      onPress={confirmLogout}
+      style={{ marginRight: 14 }}
+      accessibilityLabel="Cerrar sesión"
+      accessibilityRole="button"
+    >
       <Text style={{ color: colors.primary, fontWeight: "600" }}>Salir</Text>
     </TouchableOpacity>
   );
@@ -49,10 +63,23 @@ export default function AppNavigator() {
   return (
     <NavigationContainer>
       <Tab.Navigator
-        screenOptions={{
-          headerRight: () => <LogoutButton />,
-          tabBarActiveTintColor: colors.primary,
-          tabBarLabelStyle: { fontSize: 11 },
+        screenOptions={({ route }) => {
+          // Buscar el key correspondiente al label de la ruta
+          const tabKey = ALL_TABS.find((t) => t.label === route.name)?.key;
+          return {
+            headerRight: () => <LogoutButton />,
+            tabBarActiveTintColor: colors.primary,
+            tabBarInactiveTintColor: colors.textMuted,
+            tabBarLabelStyle: { fontSize: 11, fontWeight: "600" },
+            tabBarStyle: { borderTopColor: colors.border },
+            // Ícono de la pestaña
+            tabBarIcon: ({ color }) => (
+              <Text style={{ fontSize: 18 }}>{TAB_ICONS[tabKey] || "●"}</Text>
+            ),
+            headerStyle: { backgroundColor: "#fff" },
+            headerTintColor: colors.text,
+            headerTitleStyle: { fontWeight: "700" },
+          };
         }}
       >
         {tabs.map((t) => (
