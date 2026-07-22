@@ -1,15 +1,14 @@
 import React from "react";
 import { View, ActivityIndicator, StyleSheet } from "react-native";
 import { StatusBar } from "expo-status-bar";
+import { SafeAreaProvider } from "react-native-safe-area-context";
 import { AuthProvider, useAuth } from "./src/context/AuthContext";
 import LoginScreen from "./src/screens/LoginScreen";
-import RegisterScreen from "./src/screens/RegisterScreen";
 import AppNavigator from "./src/navigation/AppNavigator";
 import { colors } from "./src/config/theme";
 
 function Root() {
   const { user, loading } = useAuth();
-  const [showRegister, setShowRegister] = React.useState(false);
 
   if (loading) {
     return (
@@ -19,22 +18,27 @@ function Root() {
     );
   }
 
-  if (user) return <AppNavigator />;
-
-  return showRegister
-    ? <RegisterScreen onBackToLogin={() => setShowRegister(false)} />
-    : <LoginScreen onGoToRegister={() => setShowRegister(true)} />;
+  return user ? <AppNavigator /> : <LoginScreen />;
 }
 
 export default function App() {
   return (
-    <AuthProvider>
-      <StatusBar style="dark" />
-      <Root />
-    </AuthProvider>
+    <SafeAreaProvider>
+      <AuthProvider>
+        {/* style="light" para que los íconos de la barra de estado sean visibles
+            sobre el fondo oscuro del login y claro del resto de la app */}
+        <StatusBar style="auto" />
+        <Root />
+      </AuthProvider>
+    </SafeAreaProvider>
   );
 }
 
 const styles = StyleSheet.create({
-  loading: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#fff" },
+  loading: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#fff",
+  },
 });
