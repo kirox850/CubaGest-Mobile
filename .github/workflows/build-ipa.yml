@@ -33,17 +33,15 @@ jobs:
           /usr/libexec/PlistBuddy -c "Delete :UILaunchStoryboardName" CubaGest/Info.plist 2>/dev/null || true
           echo "✅ SplashScreen eliminado"
 
-      - name: Replace AppIcon with empty placeholder
+      - name: Remove Images.xcassets from Xcode project
         run: |
-          rm -rf ios/CubaGest/Images.xcassets/AppIcon.appiconset
-          mkdir -p ios/CubaGest/Images.xcassets/AppIcon.appiconset
-          cat > ios/CubaGest/Images.xcassets/AppIcon.appiconset/Contents.json << 'EOF'
-          {
-            "images": [],
-            "info": { "version": 1, "author": "xcode" }
-          }
-          EOF
-          echo "✅ AppIcon vaciado"
+          cd ios
+          # Eliminar todas las referencias a xcassets del project.pbxproj
+          sed -i '' '/Images\.xcassets/d' CubaGest.xcodeproj/project.pbxproj
+          # Eliminar el directorio físico
+          rm -rf CubaGest/Images.xcassets
+          echo "✅ Images.xcassets eliminado"
+          grep "xcassets" CubaGest.xcodeproj/project.pbxproj && echo "⚠ Aún hay referencias" || echo "✅ Sin referencias residuales"
 
       - name: Clear Xcode DerivedData
         run: rm -rf ~/Library/Developer/Xcode/DerivedData
@@ -86,8 +84,6 @@ jobs:
             AD_HOC_CODE_SIGNING_ALLOWED=YES \
             ONLY_ACTIVE_ARCH=NO \
             IPHONEOS_DEPLOYMENT_TARGET=16.0 \
-            ASSETCATALOG_COMPILER_SKIP_APP_STORE_DEPLOYMENT=YES \
-            ASSETCATALOG_COMPILER_APPICON_NAME="" \
             archive 2>&1 | tee build.log
           ls -la build/ || echo "build/ no existe"
 
