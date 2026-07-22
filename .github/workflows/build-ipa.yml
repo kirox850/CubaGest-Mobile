@@ -70,8 +70,6 @@ jobs:
 
       - name: Archive (unsigned)
         shell: bash
-        env:
-          EXCLUDED_ARCHS: arm64
         run: |
           set -o pipefail
           xcodebuild \
