@@ -1,38 +1,61 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
-import { getToken, setToken as saveToken } from "../api/client";
+import NetInfo from "@react-native-community/netinfo";
+import { getToken, setToken as saveToken, getCachedUser, setCachedUser } from "../api/client";
 import { AuthAPI } from "../api/endpoints";
 
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(null);
+  const [user, setUser]       = useState(null);
   const [loading, setLoading] = useState(true);
+  const [online, setOnline]   = useState(true);
 
+  // Monitor network
+  useEffect(() => {
+    const unsub = NetInfo.addEventListener(state => {
+      setOnline(state.isConnected && state.isInternetReachable !== false);
+    });
+    return unsub;
+  }, []);
+
+  // Restore session
   useEffect(() => {
     (async () => {
       const token = await getToken();
-      if (token) {
-        try {
-          const me = await AuthAPI.me();
-          setUser(me);
-        } catch (err) {
-          await saveToken(null); // token vencido o inválido
-        }
+      if (!token) { setLoading(false); return; }
+
+      const netState = await NetInfo.fetch();
+      const isOnline = netState.isConnected && netState.isInternetReachable !== false;
+
+      if (!isOnline) {
+        // Offline: use cached user directly
+        const cached = await getCachedUser();
+        if (cached) setUser(cached);
+        else await saveToken(null); // no cache, force login
+        setLoading(false);
+        return;
+      }
+
+      // Online: verify with server
+      try {
+        const me = await AuthAPI.me();
+        await setCachedUser(me);
+        setUser(me);
+      } catch {
+        // Server failed — try cache
+        const cached = await getCachedUser();
+        if (cached) setUser(cached);
+        else await saveToken(null);
       }
       setLoading(false);
     })();
   }, []);
 
-  const register = async (payload) => {
-    const { token, user: newUser } = await AuthAPI.register(payload);
-    await saveToken(token);
-    setUser(newUser);
-  };
-
   const login = async (email, password) => {
-    const { token, user: loggedUser } = await AuthAPI.login(email, password);
+    const { token, user: u } = await AuthAPI.login(email, password);
     await saveToken(token);
-    setUser(loggedUser);
+    await setCachedUser(u);
+    setUser(u);
   };
 
   const logout = async () => {
@@ -41,7 +64,7 @@ export function AuthProvider({ children }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout, register }}>
+    <AuthContext.Provider value={{ user, loading, online, login, logout }}>
       {children}
     </AuthContext.Provider>
   );
