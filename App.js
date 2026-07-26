@@ -5,40 +5,32 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { AuthProvider, useAuth } from "./src/context/AuthContext";
 import LoginScreen from "./src/screens/LoginScreen";
 import AppNavigator from "./src/navigation/AppNavigator";
-import { colors } from "./src/config/theme";
+
+const PRIMARY = "#8B1A1A";
 
 function Root() {
   const { user, loading } = useAuth();
-
   if (loading) {
     return (
       <View style={styles.loading}>
-        <ActivityIndicator size="large" color={colors.primary} />
+        <ActivityIndicator size="large" color={PRIMARY}/>
       </View>
     );
   }
-
-  return user ? <AppNavigator /> : <LoginScreen />;
+  return user ? <AppNavigator/> : <LoginScreen/>;
 }
 
 export default function App() {
   return (
     <SafeAreaProvider>
       <AuthProvider>
-        {/* style="light" para que los íconos de la barra de estado sean visibles
-            sobre el fondo oscuro del login y claro del resto de la app */}
-        <StatusBar style="auto" />
-        <Root />
+        <StatusBar style="auto"/>
+        <Root/>
       </AuthProvider>
     </SafeAreaProvider>
   );
 }
 
 const styles = StyleSheet.create({
-  loading: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#fff",
-  },
+  loading: { flex:1, alignItems:"center", justifyContent:"center", backgroundColor:"#fff" },
 });
