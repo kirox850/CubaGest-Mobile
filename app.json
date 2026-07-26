@@ -14,12 +14,8 @@
     "android": {
       "package": "cu.cubagest.mobile",
       "adaptiveIcon": {
-        "foregroundImage": "./assets/icon.png",
         "backgroundColor": "#8B1A1A"
       }
-    },
-    "plugins": [
-      ["@react-native-community/netinfo"]
-    ]
+    }
   }
 }
