@@ -1,69 +1,127 @@
 import React, { useCallback, useState } from "react";
-import { View, Text, StyleSheet, ScrollView, RefreshControl } from "react-native";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, RefreshControl } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
 import { DashboardAPI } from "../api/endpoints";
+import { useAuth } from "../context/AuthContext";
 import { colors } from "../config/theme";
-import { Card, ErrorBanner } from "../components/UI";
+import { ROLES } from "../config/roles";
+import { ErrorBanner } from "../components/UI";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
-const fmt = (n) => Number(n || 0).toLocaleString("es-CU", { minimumFractionDigits: 2 });
+const fmt = (n) => new Intl.NumberFormat("es-CU", { minimumFractionDigits: 2 }).format(n || 0);
+const CACHE_KEY = "cubagest_dashboard";
 
 export default function DashboardScreen() {
-  const [data, setData] = useState(null);
-  const [error, setError] = useState("");
-  const [refreshing, setRefreshing] = useState(false);
+  const { user, online } = useAuth();
+  const [summary, setSummary]     = useState(null);
+  const [loading, setLoading]     = useState(true);
+  const [error, setError]         = useState("");
+  const [cacheDate, setCacheDate] = useState(null);
 
   const load = useCallback(async () => {
-    try {
-      setError("");
-      const summary = await DashboardAPI.summary();
-      setData(summary);
-    } catch (err) {
-      setError(err.message);
+    setLoading(true);
+    setError("");
+
+    if (online) {
+      try {
+        const data = await DashboardAPI.summary();
+        setSummary(data);
+        await AsyncStorage.setItem(CACHE_KEY, JSON.stringify({ data, cachedAt: Date.now() }));
+        setCacheDate(null);
+      } catch (e) {
+        // Intentar caché
+        const raw = await AsyncStorage.getItem(CACHE_KEY);
+        if (raw) {
+          const { data, cachedAt } = JSON.parse(raw);
+          setSummary(data);
+          setCacheDate(new Date(cachedAt).toLocaleDateString("es-CU"));
+        } else {
+          setError(e.message);
+        }
+      }
+    } else {
+      const raw = await AsyncStorage.getItem(CACHE_KEY);
+      if (raw) {
+        const { data, cachedAt } = JSON.parse(raw);
+        setSummary(data);
+        setCacheDate(new Date(cachedAt).toLocaleDateString("es-CU"));
+      } else {
+        setError("Sin conexión y sin datos en caché");
+      }
     }
-  }, []);
+    setLoading(false);
+  }, [online]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  const onRefresh = async () => {
-    setRefreshing(true);
-    await load();
-    setRefreshing(false);
-  };
+  const StatCard = ({ label, value, sub, color, icon }) => (
+    <View style={styles.card}>
+      <Text style={styles.cardLabel}>{label}</Text>
+      <Text style={[styles.cardValue, { color: color || colors.text }]}>{value}</Text>
+      {sub ? <Text style={styles.cardSub}>{sub}</Text> : null}
+      <Text style={styles.cardIcon}>{icon}</Text>
+    </View>
+  );
 
   return (
-    <ScrollView style={styles.wrap} contentContainerStyle={{ padding: 16 }} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
-      <Text style={styles.title}>Dashboard</Text>
-      <ErrorBanner message={error} />
-      {data && (
+    <ScrollView
+      style={styles.wrap}
+      refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={colors.primary}/>}
+    >
+      <ErrorBanner message={error}/>
+      {cacheDate && (
+        <View style={styles.offlineBanner}>
+          <Text style={styles.offlineText}>⚡ Datos del {cacheDate} — sin conexión</Text>
+        </View>
+      )}
+
+      <View style={styles.header}>
+        <Text style={styles.welcome}>Bienvenido, {user?.name}</Text>
+        <Text style={styles.role}>{ROLES[user?.role]?.label}</Text>
+      </View>
+
+      {summary && (
         <>
           <View style={styles.grid}>
-            <Card style={styles.metric}>
-              <Text style={styles.metricLabel}>Ingresos totales</Text>
-              <Text style={[styles.metricValue, { color: colors.success }]}>${fmt(data.totalRevenue)}</Text>
-            </Card>
-            <Card style={styles.metric}>
-              <Text style={styles.metricLabel}>Gastos totales</Text>
-              <Text style={[styles.metricValue, { color: colors.danger }]}>${fmt(data.totalExpenses)}</Text>
-            </Card>
-            <Card style={styles.metric}>
-              <Text style={styles.metricLabel}>Utilidad neta</Text>
-              <Text style={styles.metricValue}>${fmt(data.netProfit)}</Text>
-            </Card>
-            <Card style={styles.metric}>
-              <Text style={styles.metricLabel}>Ventas de hoy</Text>
-              <Text style={styles.metricValue}>{data.todaySalesCount} (${fmt(data.todaySalesTotal)})</Text>
-            </Card>
+            <StatCard
+              label="Ingresos del Mes"
+              value={`$${fmt(summary.totalRevenue)} CUP`}
+              sub={`${summary.salesCount || 0} facturas`}
+              color={colors.success}
+              icon="📈"
+            />
+            <StatCard
+              label="Gastos del Mes"
+              value={`$${fmt(summary.totalExpenses)} CUP`}
+              sub="Total egresos"
+              color={colors.danger}
+              icon="💸"
+            />
+          </View>
+          <View style={styles.grid}>
+            <StatCard
+              label="Utilidad Neta"
+              value={`$${fmt(summary.netProfit)} CUP`}
+              sub={`Margen: ${Math.round((summary.netProfit / Math.max(summary.totalRevenue, 1)) * 100)}%`}
+              color={summary.netProfit >= 0 ? "#1A5C8B" : colors.danger}
+              icon="💰"
+            />
+            <StatCard
+              label="Alertas Stock"
+              value={summary.lowStockProducts?.length || 0}
+              sub={summary.lowStockProducts?.length ? "Productos con stock bajo" : "Todo OK"}
+              color={summary.lowStockProducts?.length ? "#c17a00" : colors.success}
+              icon="📦"
+            />
           </View>
 
-          {data.lowStockCount > 0 && (
-            <Card style={{ backgroundColor: colors.warningBg, borderColor: colors.warningBorder, marginTop: 12 }}>
-              <Text style={styles.warnTitle}>⚠ Productos con stock bajo ({data.lowStockCount})</Text>
-              {data.lowStock.map((p) => (
-                <Text key={p.id} style={styles.warnItem}>
-                  {p.name} — {p.stock} {p.unit} (mín: {p.minStock})
-                </Text>
+          {summary.lowStockProducts?.length > 0 && (
+            <View style={styles.alertBox}>
+              <Text style={styles.alertTitle}>⚠ Productos con stock bajo</Text>
+              {summary.lowStockProducts.map(p => (
+                <Text key={p.id} style={styles.alertItem}>• {p.name} — {p.stock} {p.unit} (mín: {p.minStock})</Text>
               ))}
-            </Card>
+            </View>
           )}
         </>
       )}
@@ -72,12 +130,19 @@ export default function DashboardScreen() {
 }
 
 const styles = StyleSheet.create({
-  wrap: { flex: 1, backgroundColor: colors.bg },
-  title: { fontSize: 22, fontWeight: "800", color: colors.text, marginBottom: 14 },
-  grid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
-  metric: { width: "47%" },
-  metricLabel: { fontSize: 12, color: colors.textMuted, marginBottom: 4 },
-  metricValue: { fontSize: 18, fontWeight: "800", color: colors.text },
-  warnTitle: { fontWeight: "700", color: "#7a4a00", marginBottom: 8 },
-  warnItem: { fontSize: 13, color: "#7a4a00", marginBottom: 4 },
+  wrap:         { flex: 1, backgroundColor: colors.bg },
+  offlineBanner:{ backgroundColor: "#c17a00", padding: 8, alignItems: "center" },
+  offlineText:  { color: "#fff", fontSize: 12, fontWeight: "600" },
+  header:       { padding: 16, paddingBottom: 8 },
+  welcome:      { fontSize: 20, fontWeight: "800", color: colors.text },
+  role:         { fontSize: 13, color: colors.textMuted, marginTop: 2 },
+  grid:         { flexDirection: "row", gap: 12, paddingHorizontal: 12, marginBottom: 12 },
+  card:         { flex: 1, backgroundColor: "#fff", borderRadius: 12, borderWidth: 1, borderColor: colors.border, padding: 14, position: "relative" },
+  cardLabel:    { fontSize: 11, fontWeight: "600", color: colors.textMuted, textTransform: "uppercase", letterSpacing: 0.5 },
+  cardValue:    { fontSize: 18, fontWeight: "800", marginTop: 6, marginBottom: 4 },
+  cardSub:      { fontSize: 11, color: colors.textMuted },
+  cardIcon:     { position: "absolute", top: 12, right: 12, fontSize: 20 },
+  alertBox:     { margin: 12, backgroundColor: "#fffbf0", borderWidth: 1, borderColor: "#f0d070", borderRadius: 10, padding: 14 },
+  alertTitle:   { fontWeight: "700", fontSize: 14, color: "#7a4a00", marginBottom: 8 },
+  alertItem:    { fontSize: 13, color: "#5a3a00", marginBottom: 4 },
 });

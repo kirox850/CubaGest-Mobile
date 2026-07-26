@@ -1,13 +1,26 @@
 import React, { useCallback, useState } from "react";
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, Alert } from "react-native";
+import {
+  View, Text, StyleSheet, FlatList, TextInput,
+  TouchableOpacity, Alert, ScrollView, Modal,
+} from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
 import { SalesAPI } from "../api/endpoints";
+import { useAuth } from "../context/AuthContext";
 import { colors } from "../config/theme";
-import { Badge, EmptyState, ErrorBanner } from "../components/UI";
+import { PAY_METHODS } from "../config/roles";
+import { EmptyState, ErrorBanner, Badge } from "../components/UI";
+
+const fmt = (n) => Number(n || 0).toFixed(2);
 
 export default function FacturacionScreen() {
-  const [sales, setSales] = useState([]);
-  const [error, setError] = useState("");
+  const { user } = useAuth();
+  const [sales, setSales]       = useState([]);
+  const [search, setSearch]     = useState("");
+  const [error, setError]       = useState("");
+  const [viewInv, setViewInv]   = useState(null);
+  const [editModal, setEditModal] = useState(false);
+  const [editForm, setEditForm] = useState({});
+  const [saving, setSaving]     = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -19,55 +32,188 @@ export default function FacturacionScreen() {
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  const confirmVoid = (sale) => {
-    Alert.alert("Anular factura", `¿Anular ${sale.invoiceNumber}? Esto repone el stock vendido.`, [
+  const filtered = sales.filter(s =>
+    (s.invoiceNumber || s.id || "").toLowerCase().includes(search.toLowerCase()) ||
+    (s.clientName || s.client || "").toLowerCase().includes(search.toLowerCase())
+  );
+
+  const openEdit = (s) => {
+    setEditForm({
+      clientName:  s.clientName  || s.client || "",
+      clientNit:   s.clientNit   || "",
+      clientPhone: s.clientPhone || "",
+      payMethod:   s.payMethod   || "efectivo",
+    });
+    setEditModal(true);
+  };
+
+  const saveEdit = async () => {
+    setSaving(true);
+    try {
+      await SalesAPI.update(viewInv.id, editForm);
+      Alert.alert("✓", "Factura actualizada");
+      setEditModal(false);
+      setViewInv(null);
+      load();
+    } catch (e) { Alert.alert("Error", e.message); }
+    finally { setSaving(false); }
+  };
+
+  const voidSale = async (id) => {
+    Alert.alert("Anular factura", "¿Seguro? El stock se repondrá.", [
       { text: "Cancelar", style: "cancel" },
       { text: "Anular", style: "destructive", onPress: async () => {
-        try { await SalesAPI.voidSale(sale.id); load(); }
-        catch (err) { Alert.alert("Error", err.message); }
+        try {
+          await SalesAPI.voidSale(id);
+          Alert.alert("✓", "Factura anulada");
+          setViewInv(null);
+          load();
+        } catch (e) { Alert.alert("Error", e.message); }
       }},
     ]);
   };
 
   return (
     <View style={styles.wrap}>
-      <Text style={styles.title}>Facturación</Text>
       <ErrorBanner message={error} />
+      <TextInput
+        style={styles.search}
+        placeholder="Buscar por No. o cliente..."
+        placeholderTextColor={colors.textMuted}
+        value={search}
+        onChangeText={setSearch}
+      />
+
       <FlatList
-        data={sales}
-        keyExtractor={(s) => s.id}
+        data={filtered}
+        keyExtractor={s => s.id}
         contentContainerStyle={{ paddingBottom: 24 }}
         ListEmptyComponent={<EmptyState text="No hay facturas" />}
-        renderItem={({ item }) => (
-          <View style={styles.row}>
+        renderItem={({ item: s }) => (
+          <TouchableOpacity style={[styles.row, s.status === "anulada" && { opacity: 0.5 }]} onPress={() => setViewInv(s)}>
             <View style={{ flex: 1 }}>
-              <Text style={styles.invoice}>{item.invoiceNumber}</Text>
-              <Text style={styles.client}>{item.clientName} · {item.date}</Text>
-              <Text style={styles.items}>{item.items?.length || 0} producto(s) · {item.payMethod}</Text>
+              <Text style={styles.invoice}>{s.invoiceNumber || s.id}</Text>
+              <Text style={styles.client}>{s.clientName || s.client}</Text>
+              <Text style={styles.date}>{(s.date || s.createdAt || "").split("T")[0]}</Text>
             </View>
-            <View style={{ alignItems: "flex-end", gap: 6 }}>
-              <Text style={styles.total}>${Number(item.total).toFixed(2)}</Text>
-              <Badge label={item.status === "emitida" ? "Emitida" : "Anulada"} color={item.status === "emitida" ? colors.success : colors.textMuted} />
-              {item.status === "emitida" && (
-                <TouchableOpacity onPress={() => confirmVoid(item)}>
-                  <Text style={styles.voidLink}>Anular</Text>
-                </TouchableOpacity>
-              )}
+            <View style={{ alignItems: "flex-end", gap: 4 }}>
+              <Text style={styles.amount}>${fmt(s.total)}</Text>
+              <Badge
+                label={s.status === "emitida" ? "Emitida" : "Anulada"}
+                color={s.status === "emitida" ? colors.success : colors.danger}
+              />
             </View>
-          </View>
+          </TouchableOpacity>
         )}
       />
+
+      {/* Modal detalle */}
+      {viewInv && (
+        <Modal visible animationType="slide" transparent onRequestClose={() => setViewInv(null)}>
+          <View style={styles.modalBg}>
+            <View style={styles.modalCard}>
+              <Text style={styles.modalTitle}>Factura {viewInv.invoiceNumber || viewInv.id}</Text>
+              <ScrollView>
+                <View style={styles.receipt}>
+                  <Text style={styles.receiptCenter}>CUBAGEST</Text>
+                  <Text style={styles.receiptCenter}>FACTURA COMERCIAL</Text>
+                  {viewInv.status === "anulada" && <Text style={[styles.receiptCenter, { color: colors.danger, fontWeight: "800" }]}>⚠ ANULADA</Text>}
+                  <Text style={styles.receiptLine}>Fecha: {(viewInv.date || viewInv.createdAt || "").split("T")[0]}</Text>
+                  <Text style={styles.receiptLine}>Cliente: {viewInv.clientName || viewInv.client}</Text>
+                  {viewInv.clientNit && <Text style={styles.receiptLine}>NIT: {viewInv.clientNit}</Text>}
+                  {viewInv.clientPhone && <Text style={styles.receiptLine}>Tel: {viewInv.clientPhone}</Text>}
+                  <Text style={styles.receiptLine}>Método: {PAY_METHODS.find(p => p.id === viewInv.payMethod)?.label || viewInv.payMethod}</Text>
+                  <Text style={styles.receiptDivider}>─────────────────────</Text>
+                  {(viewInv.items || viewInv.SaleItems || []).map((item, i) => (
+                    <View key={i} style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                      <Text style={styles.receiptLine}>{item.qty}x {item.name}</Text>
+                      <Text style={styles.receiptLine}>${fmt(item.total || item.price * item.qty)}</Text>
+                    </View>
+                  ))}
+                  <Text style={styles.receiptDivider}>─────────────────────</Text>
+                  <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                    <Text style={[styles.receiptLine, { fontWeight: "800" }]}>TOTAL:</Text>
+                    <Text style={[styles.receiptLine, { fontWeight: "800" }]}>${fmt(viewInv.total)} CUP</Text>
+                  </View>
+                </View>
+              </ScrollView>
+
+              <View style={styles.modalActions}>
+                {viewInv.status === "emitida" && (
+                  <>
+                    <TouchableOpacity style={styles.btnDanger} onPress={() => voidSale(viewInv.id)}>
+                      <Text style={{ color: "#fff", fontWeight: "700" }}>Anular</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.btnSecondary} onPress={() => openEdit(viewInv)}>
+                      <Text style={{ color: colors.text, fontWeight: "600" }}>Editar datos</Text>
+                    </TouchableOpacity>
+                  </>
+                )}
+                <TouchableOpacity style={styles.btnSecondary} onPress={() => setViewInv(null)}>
+                  <Text style={{ color: colors.text, fontWeight: "600" }}>Cerrar</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      )}
+
+      {/* Modal editar */}
+      {editModal && (
+        <Modal visible animationType="slide" transparent onRequestClose={() => setEditModal(false)}>
+          <View style={styles.modalBg}>
+            <View style={styles.modalCard}>
+              <Text style={styles.modalTitle}>Editar datos de factura</Text>
+              <Text style={styles.note}>Solo se pueden editar datos del cliente y método de pago.</Text>
+              <TextInput style={styles.input} value={editForm.clientName} onChangeText={v => setEditForm(f => ({...f,clientName:v}))} placeholder="Nombre del cliente" placeholderTextColor={colors.textMuted}/>
+              <TextInput style={styles.input} value={editForm.clientNit} onChangeText={v => setEditForm(f => ({...f,clientNit:v}))} placeholder="NIT" keyboardType="numeric" maxLength={11} placeholderTextColor={colors.textMuted}/>
+              <TextInput style={styles.input} value={editForm.clientPhone} onChangeText={v => setEditForm(f => ({...f,clientPhone:v}))} placeholder="Teléfono" keyboardType="phone-pad" placeholderTextColor={colors.textMuted}/>
+              <View style={styles.payRow}>
+                {PAY_METHODS.map(m => (
+                  <TouchableOpacity key={m.id} style={[styles.payBtn, editForm.payMethod===m.id && styles.payBtnActive]} onPress={()=>setEditForm(f=>({...f,payMethod:m.id}))}>
+                    <Text style={[styles.payBtnText, editForm.payMethod===m.id && {color:"#fff"}]}>{m.label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              <View style={styles.modalActions}>
+                <TouchableOpacity style={styles.btnSecondary} onPress={() => setEditModal(false)}>
+                  <Text style={{ fontWeight: "600" }}>Cancelar</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.btnPrimary, saving && { opacity: 0.6 }]} onPress={saveEdit} disabled={saving}>
+                  <Text style={{ color: "#fff", fontWeight: "700" }}>{saving ? "Guardando..." : "Guardar"}</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  wrap: { flex: 1, backgroundColor: colors.bg, padding: 16 },
-  title: { fontSize: 22, fontWeight: "800", color: colors.text, marginBottom: 10 },
-  row: { flexDirection: "row", backgroundColor: "#fff", borderRadius: 10, borderWidth: 1, borderColor: colors.border, padding: 12, marginBottom: 8 },
-  invoice: { fontWeight: "700", fontFamily: "monospace", color: colors.text },
-  client: { fontSize: 13, color: colors.text, marginTop: 2 },
-  items: { fontSize: 11, color: colors.textMuted, marginTop: 2 },
-  total: { fontWeight: "800", color: colors.text },
-  voidLink: { color: colors.danger, fontSize: 12, fontWeight: "600" },
+  wrap:          { flex: 1, backgroundColor: colors.bg, padding: 12 },
+  search:        { borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 9, backgroundColor: "#fff", marginBottom: 12, fontSize: 14, color: colors.text },
+  row:           { flexDirection: "row", backgroundColor: "#fff", borderRadius: 10, borderWidth: 1, borderColor: colors.border, padding: 12, marginBottom: 8 },
+  invoice:       { fontWeight: "700", fontSize: 13, color: colors.primary, fontFamily: "monospace" },
+  client:        { fontSize: 13, color: colors.text, marginTop: 2 },
+  date:          { fontSize: 11, color: colors.textMuted },
+  amount:        { fontWeight: "800", fontSize: 15, color: colors.text },
+  modalBg:       { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
+  modalCard:     { backgroundColor: "#fff", borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 20, maxHeight: "85%" },
+  modalTitle:    { fontWeight: "800", fontSize: 16, marginBottom: 14, color: colors.text },
+  receipt:       { backgroundColor: colors.bg, borderRadius: 8, padding: 14, marginBottom: 16 },
+  receiptCenter: { textAlign: "center", fontWeight: "700", fontSize: 13, color: colors.text, marginBottom: 2, fontFamily: "monospace" },
+  receiptLine:   { fontSize: 12, color: colors.text, fontFamily: "monospace", marginBottom: 2 },
+  receiptDivider:{ fontSize: 11, color: colors.textMuted, fontFamily: "monospace", marginVertical: 4 },
+  modalActions:  { flexDirection: "row", gap: 8, justifyContent: "flex-end", marginTop: 8 },
+  btnPrimary:    { backgroundColor: colors.primary, paddingVertical: 10, paddingHorizontal: 18, borderRadius: 8 },
+  btnSecondary:  { backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.border, paddingVertical: 10, paddingHorizontal: 14, borderRadius: 8 },
+  btnDanger:     { backgroundColor: colors.danger || "#8B1A1A", paddingVertical: 10, paddingHorizontal: 14, borderRadius: 8 },
+  note:          { fontSize: 12, color: "#c17a00", backgroundColor: "#fffbf0", borderRadius: 6, padding: 8, marginBottom: 12 },
+  input:         { borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, fontSize: 13, backgroundColor: colors.bg, marginBottom: 10, color: colors.text },
+  payRow:        { flexDirection: "row", gap: 8, marginBottom: 12 },
+  payBtn:        { flex: 1, borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingVertical: 8, alignItems: "center" },
+  payBtnActive:  { backgroundColor: colors.primary, borderColor: colors.primary },
+  payBtnText:    { fontSize: 12, fontWeight: "600", color: colors.text },
 });
