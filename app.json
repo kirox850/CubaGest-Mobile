@@ -5,6 +5,7 @@
     "version": "1.1.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
+    "sdkVersion": "51.0.0",
     "splash": { "backgroundColor": "#1a0a05" },
     "assetBundlePatterns": ["**/*"],
     "ios": {
