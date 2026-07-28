@@ -1,62 +1,51 @@
 import React, { useState } from "react";
 import {
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  StyleSheet,
-  ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
+  View, Text, TextInput, TouchableOpacity,
+  StyleSheet, ActivityIndicator, KeyboardAvoidingView,
+  Platform, ScrollView,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuth } from "../context/AuthContext";
-import { colors } from "../config/theme";
-import { ErrorBanner } from "../components/UI";
+import { colors, radius, shadow } from "../config/theme";
 
 export default function LoginScreen() {
   const { login } = useAuth();
-  const [email, setEmail] = useState("");
+  const [email, setEmail]       = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [error, setError]       = useState("");
+  const [loading, setLoading]   = useState(false);
 
   const handleLogin = async () => {
-    if (!email || !password) {
-      setError("Ingrese correo y contraseña");
-      return;
-    }
-    setError("");
-    setLoading(true);
+    if (!email || !password) { setError("Ingrese correo y contraseña"); return; }
+    setError(""); setLoading(true);
     try {
       await login(email, password);
     } catch (err) {
       setError(err.message || "Error al iniciar sesión");
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   };
 
   return (
-    // SafeAreaView ocupa toda la pantalla incluyendo notch y home indicator
     <SafeAreaView style={styles.safe}>
-      <KeyboardAvoidingView
-        style={styles.wrap}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-      >
-        <ScrollView
-          contentContainerStyle={styles.scroll}
-          keyboardShouldPersistTaps="handled"
-        >
-          <View style={styles.logo}>
-            <Text style={styles.logoText}>CG</Text>
-          </View>
-          <Text style={styles.title}>CubaGest</Text>
-          <Text style={styles.subtitle}>Sistema de Gestión Empresarial</Text>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+        <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
 
-          <View style={styles.form}>
-            <ErrorBanner message={error} />
+          {/* Logo */}
+          <View style={styles.logoWrap}>
+            <View style={styles.logoCircle}>
+              <Text style={styles.logoText}>CG</Text>
+            </View>
+            <Text style={styles.title}>CubaGest</Text>
+            <Text style={styles.subtitle}>Sistema de Gestión Empresarial</Text>
+          </View>
+
+          {/* Form card */}
+          <View style={styles.card}>
+            {error ? (
+              <View style={styles.errorBox}>
+                <Text style={styles.errorText}>⚠ {error}</Text>
+              </View>
+            ) : null}
 
             <Text style={styles.label}>Correo electrónico</Text>
             <TextInput
@@ -66,7 +55,6 @@ export default function LoginScreen() {
               placeholder="usuario@empresa.cu"
               placeholderTextColor={colors.textMuted}
               autoCapitalize="none"
-              autoCorrect={false}
               keyboardType="email-address"
               textContentType="emailAddress"
               returnKeyType="next"
@@ -86,23 +74,21 @@ export default function LoginScreen() {
             />
 
             <TouchableOpacity
-              style={[styles.button, loading && styles.buttonDisabled]}
+              style={[styles.btn, loading && { opacity: 0.65 }]}
               onPress={handleLogin}
               disabled={loading}
             >
-              {loading ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <Text style={styles.buttonText}>Iniciar sesión</Text>
-              )}
+              {loading
+                ? <ActivityIndicator color="#fff"/>
+                : <Text style={styles.btnText}>Iniciar sesión</Text>}
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.registerLink}>
-              <Text style={styles.registerText}>
-                Crear mi negocio (primera vez)
-              </Text>
+            <TouchableOpacity style={styles.linkBtn}>
+              <Text style={styles.linkText}>Crear mi negocio (primera vez)</Text>
             </TouchableOpacity>
           </View>
+
+          <Text style={styles.legal}>Conforme a Resolución 286/2019 MINFIN · Ley 149/2022</Text>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -110,65 +96,41 @@ export default function LoginScreen() {
 }
 
 const styles = StyleSheet.create({
-  // safe cubre todo: notch arriba + home indicator abajo
-  safe: { flex: 1, backgroundColor: colors.primaryDark },
-  wrap: { flex: 1 },
-  scroll: {
-    flexGrow: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 24,
-  },
-  logo: {
-    width: 64,
-    height: 64,
-    borderRadius: 16,
+  safe:       { flex: 1, backgroundColor: "#0F172A" },
+  scroll:     { flexGrow: 1, alignItems: "center", justifyContent: "center", padding: 24 },
+  logoWrap:   { alignItems: "center", marginBottom: 32 },
+  logoCircle: {
+    width: 72, height: 72, borderRadius: 20,
     backgroundColor: colors.primary,
-    alignItems: "center",
-    justifyContent: "center",
+    alignItems: "center", justifyContent: "center",
     marginBottom: 16,
+    ...shadow.lg,
   },
-  logoText: { color: "#fff", fontSize: 26, fontWeight: "800" },
-  title: { color: "#fff", fontSize: 26, fontWeight: "800", marginBottom: 4 },
-  subtitle: {
-    color: "rgba(255,255,255,0.6)",
-    fontSize: 13,
-    marginBottom: 28,
-  },
-  form: {
-    width: "100%",
-    maxWidth: 380,
+  logoText:   { color: "#fff", fontSize: 26, fontWeight: "900", letterSpacing: -1 },
+  title:      { color: "#fff", fontSize: 28, fontWeight: "800", letterSpacing: -0.5 },
+  subtitle:   { color: "rgba(255,255,255,0.5)", fontSize: 13, marginTop: 4 },
+  card: {
+    width: "100%", maxWidth: 400,
     backgroundColor: "#fff",
-    borderRadius: 16,
-    padding: 24,
+    borderRadius: 20, padding: 24,
+    ...shadow.lg,
   },
-  label: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: colors.textMuted,
-    textTransform: "uppercase",
-    marginBottom: 6,
-    marginTop: 14,
-  },
+  errorBox:   { backgroundColor: colors.dangerBg, borderRadius: 10, padding: 12, marginBottom: 14 },
+  errorText:  { color: colors.danger, fontSize: 13, fontWeight: "600" },
+  label:      { fontSize: 12, fontWeight: "700", color: colors.textMuted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6, marginTop: 14 },
   input: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 15,
-    backgroundColor: colors.bg,
-    color: colors.text,
+    borderWidth: 1.5, borderColor: colors.border,
+    borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12,
+    fontSize: 15, backgroundColor: colors.bg, color: colors.text,
   },
-  button: {
+  btn: {
     backgroundColor: colors.primary,
-    borderRadius: 8,
-    paddingVertical: 13,
-    alignItems: "center",
-    marginTop: 22,
+    borderRadius: 12, paddingVertical: 14,
+    alignItems: "center", marginTop: 22,
+    ...shadow.md,
   },
-  buttonDisabled: { opacity: 0.6 },
-  buttonText: { color: "#fff", fontWeight: "700", fontSize: 15 },
-  registerLink: { marginTop: 16, alignItems: "center" },
-  registerText: { color: colors.primary, fontWeight: "600", fontSize: 14 },
+  btnText:    { color: "#fff", fontWeight: "800", fontSize: 15 },
+  linkBtn:    { marginTop: 16, alignItems: "center" },
+  linkText:   { color: colors.primary, fontWeight: "600", fontSize: 14 },
+  legal:      { marginTop: 28, fontSize: 10, color: "rgba(255,255,255,0.25)", textAlign: "center" },
 });

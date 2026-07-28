@@ -56,17 +56,19 @@ export default function DashboardScreen() {
 
   const StatCard = ({ label, value, sub, color, icon }) => (
     <View style={styles.card}>
-      <Text style={styles.cardLabel}>{label}</Text>
+      <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" }}>
+        <Text style={styles.cardLabel}>{label}</Text>
+        <Text style={styles.cardIcon}>{icon}</Text>
+      </View>
       <Text style={[styles.cardValue, { color: color || colors.text }]}>{value}</Text>
       {sub ? <Text style={styles.cardSub}>{sub}</Text> : null}
-      <Text style={styles.cardIcon}>{icon}</Text>
     </View>
   );
 
   return (
     <ScrollView
       style={styles.wrap}
-      refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={colors.primary}/>}
+      refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={"#3B82F6"}/>}
     >
       <ErrorBanner message={error}/>
       {cacheDate && (
@@ -87,14 +89,14 @@ export default function DashboardScreen() {
               label="Ingresos del Mes"
               value={`$${fmt(summary.totalRevenue)} CUP`}
               sub={`${summary.salesCount || 0} facturas`}
-              color={colors.success}
+              color={"#10B981"}
               icon="📈"
             />
             <StatCard
               label="Gastos del Mes"
               value={`$${fmt(summary.totalExpenses)} CUP`}
               sub="Total egresos"
-              color={colors.danger}
+              color={"#EF4444"}
               icon="💸"
             />
           </View>
@@ -103,14 +105,14 @@ export default function DashboardScreen() {
               label="Utilidad Neta"
               value={`$${fmt(summary.netProfit)} CUP`}
               sub={`Margen: ${Math.round((summary.netProfit / Math.max(summary.totalRevenue, 1)) * 100)}%`}
-              color={summary.netProfit >= 0 ? "#1A5C8B" : colors.danger}
+              color={summary.netProfit >= 0 ? "#3B82F6" : "#EF4444"}
               icon="💰"
             />
             <StatCard
               label="Alertas Stock"
               value={summary.lowStockProducts?.length || 0}
               sub={summary.lowStockProducts?.length ? "Productos con stock bajo" : "Todo OK"}
-              color={summary.lowStockProducts?.length ? "#c17a00" : colors.success}
+              color={summary.lowStockProducts?.length ? "#F97316" : "#10B981"}
               icon="📦"
             />
           </View>
@@ -131,7 +133,7 @@ export default function DashboardScreen() {
 
 const styles = StyleSheet.create({
   wrap:         { flex: 1, backgroundColor: colors.bg },
-  offlineBanner:{ backgroundColor: "#c17a00", padding: 8, alignItems: "center" },
+  offlineBanner:{ backgroundColor: "#F97316", padding: 8, alignItems: "center" },
   offlineText:  { color: "#fff", fontSize: 12, fontWeight: "600" },
   header:       { padding: 16, paddingBottom: 8 },
   welcome:      { fontSize: 20, fontWeight: "800", color: colors.text },
@@ -142,7 +144,7 @@ const styles = StyleSheet.create({
   cardValue:    { fontSize: 18, fontWeight: "800", marginTop: 6, marginBottom: 4 },
   cardSub:      { fontSize: 11, color: colors.textMuted },
   cardIcon:     { position: "absolute", top: 12, right: 12, fontSize: 20 },
-  alertBox:     { margin: 12, backgroundColor: "#fffbf0", borderWidth: 1, borderColor: "#f0d070", borderRadius: 10, padding: 14 },
-  alertTitle:   { fontWeight: "700", fontSize: 14, color: "#7a4a00", marginBottom: 8 },
-  alertItem:    { fontSize: 13, color: "#5a3a00", marginBottom: 4 },
+  alertBox:     { margin: 12, backgroundColor: "#FFF7ED", borderWidth: 1, borderColor: "#FED7AA", borderRadius: 10, padding: 14 },
+  alertTitle:   { fontWeight: "700", fontSize: 14, color: "#9A3412", marginBottom: 8 },
+  alertItem:    { fontSize: 13, color: "#7C2D12", marginBottom: 4 },
 });

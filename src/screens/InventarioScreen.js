@@ -184,7 +184,7 @@ export default function InventarioScreen() {
   const Field = ({ label, ...props }) => (
     <View style={{ marginBottom: 10 }}>
       <Text style={styles.fieldLabel}>{label}</Text>
-      <TextInput style={styles.fieldInput} placeholderTextColor={colors.textMuted} {...props} />
+      <TextInput style={styles.fieldInput} placeholderTextColor={"#1E293B"Muted} {...props} />
     </View>
   );
 
@@ -204,7 +204,7 @@ export default function InventarioScreen() {
       <TextInput
         style={styles.search}
         placeholder="Buscar por nombre o código..."
-        placeholderTextColor={colors.textMuted}
+        placeholderTextColor={"#1E293B"Muted}
         value={search}
         onChangeText={setSearch}
       />
@@ -235,7 +235,7 @@ export default function InventarioScreen() {
                 <Text style={styles.price}>${Number(item.price).toFixed(2)}</Text>
                 <Badge
                   label={`${item.stock} ${item.unit}`}
-                  color={low ? colors.warning : colors.success}
+                  color={low ? "#F97316" : "#10B981"}
                 />
                 {canManage && (
                   <TouchableOpacity
@@ -284,7 +284,7 @@ export default function InventarioScreen() {
             <TextInput
               style={styles.qtyInput}
               placeholder="Cantidad"
-              placeholderTextColor={colors.textMuted}
+              placeholderTextColor={"#1E293B"Muted}
               keyboardType="numeric"
               value={qty}
               onChangeText={setQty}
@@ -294,7 +294,7 @@ export default function InventarioScreen() {
                 style={styles.cancelBtn}
                 onPress={() => setSelected(null)}
               >
-                <Text style={{ color: colors.textMuted }}>Cancelar</Text>
+                <Text style={{ color: "#1E293B"Muted }}>Cancelar</Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.saveBtn} onPress={saveAdjust}>
                 <Text style={{ color: "#fff", fontWeight: "700" }}>Guardar</Text>
@@ -386,7 +386,7 @@ export default function InventarioScreen() {
                   onPress={() => setProductModal(false)}
                   disabled={saving}
                 >
-                  <Text style={{ color: colors.textMuted }}>Cancelar</Text>
+                  <Text style={{ color: "#1E293B"Muted }}>Cancelar</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[styles.saveBtn, saving && { opacity: 0.6 }]}
@@ -407,46 +407,46 @@ export default function InventarioScreen() {
 }
 
 const styles = StyleSheet.create({
-  wrap: { flex: 1, backgroundColor: colors.bg, padding: 16 },
+  wrap: { flex: 1, backgroundColor: "#F8FAFC", padding: 16 },
   header: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     marginBottom: 10,
   },
-  title: { fontSize: 22, fontWeight: "800", color: colors.text },
+  title: { fontSize: 22, fontWeight: "800", color: "#1E293B" },
   addBtn: {
-    backgroundColor: colors.primary,
-    borderRadius: 8,
+    backgroundColor: "#3B82F6",
+    borderRadius: 12,
     paddingVertical: 7,
     paddingHorizontal: 14,
   },
   addBtnText: { color: "#fff", fontWeight: "700", fontSize: 14 },
   search: {
     borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 8,
+    borderColor: "#E2E8F0",
+    borderRadius: 12,
     paddingHorizontal: 12,
     paddingVertical: 9,
     backgroundColor: "#fff",
     marginBottom: 12,
-    color: colors.text,
+    color: "#1E293B",
   },
   row: {
     flexDirection: "row",
     backgroundColor: "#fff",
-    borderRadius: 10,
+    borderRadius: 14,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: "#E2E8F0",
     padding: 12,
     marginBottom: 8,
     alignItems: "center",
   },
-  name: { fontWeight: "700", fontSize: 14, color: colors.text },
-  code: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
-  hint: { fontSize: 10, color: colors.border, marginTop: 2 },
-  price: { fontWeight: "700", color: colors.text, marginBottom: 4 },
-  deleteLink: { fontSize: 11, color: colors.danger, marginTop: 6 },
+  name: { fontWeight: "700", fontSize: 14, color: "#1E293B" },
+  code: { fontSize: 12, color: "#1E293B"Muted, marginTop: 2 },
+  hint: { fontSize: 10, color: "#E2E8F0", marginTop: 2 },
+  price: { fontWeight: "700", color: "#1E293B", marginBottom: 4 },
+  deleteLink: { fontSize: 11, color: "#EF4444", marginTop: 6 },
 
   // Modales
   modalBg: {
@@ -464,31 +464,31 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     fontSize: 16,
     marginBottom: 16,
-    color: colors.text,
+    color: "#1E293B",
   },
   typeRow: { flexDirection: "row", gap: 8, marginBottom: 14 },
   typeBtn: {
     flex: 1,
     borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 8,
+    borderColor: "#E2E8F0",
+    borderRadius: 12,
     paddingVertical: 10,
     alignItems: "center",
   },
   typeBtnActive: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary,
+    backgroundColor: "#3B82F6",
+    borderColor: "#3B82F6",
   },
-  typeBtnText: { color: colors.text, fontWeight: "600" },
+  typeBtnText: { color: "#1E293B", fontWeight: "600" },
   typeBtnTextActive: { color: "#fff" },
   qtyInput: {
     borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 8,
+    borderColor: "#E2E8F0",
+    borderRadius: 12,
     padding: 10,
     fontSize: 16,
     marginBottom: 16,
-    color: colors.text,
+    color: "#1E293B",
   },
   modalActions: {
     flexDirection: "row",
@@ -497,28 +497,28 @@ const styles = StyleSheet.create({
   },
   cancelBtn: { paddingVertical: 10, paddingHorizontal: 16 },
   saveBtn: {
-    backgroundColor: colors.primary,
+    backgroundColor: "#3B82F6",
     paddingVertical: 10,
     paddingHorizontal: 18,
-    borderRadius: 8,
+    borderRadius: 12,
   },
 
   // Formulario de producto
   fieldLabel: {
     fontSize: 12,
     fontWeight: "600",
-    color: colors.textMuted,
+    color: "#1E293B"Muted,
     textTransform: "uppercase",
     marginBottom: 4,
   },
   fieldInput: {
     borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 8,
+    borderColor: "#E2E8F0",
+    borderRadius: 12,
     paddingHorizontal: 10,
     paddingVertical: 8,
     fontSize: 14,
-    color: colors.text,
-    backgroundColor: colors.bg,
+    color: "#1E293B",
+    backgroundColor: "#F8FAFC",
   },
 });

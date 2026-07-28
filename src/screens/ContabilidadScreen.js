@@ -70,8 +70,8 @@ export default function ContabilidadScreen() {
             <Text style={styles.summaryTitle}>📋 Resumen ONAT</Text>
             {[
               ["Ingresos brutos", totalIncome, "#1A7A3C"],
-              ["Total egresos",   totalExp,    colors.danger],
-              ["Utilidad neta",   net,         net >= 0 ? "#1A5C8B" : colors.danger],
+              ["Total egresos",   totalExp,    "#EF4444"],
+              ["Utilidad neta",   net,         net >= 0 ? "#1A5C8B" : "#EF4444"],
             ].map(([label, value, color]) => (
               <View key={label} style={styles.summaryRow}>
                 <Text style={styles.summaryLabel}>{label}</Text>
@@ -115,7 +115,7 @@ export default function ContabilidadScreen() {
                 <Text style={styles.rowPrimary}>{e.concept}</Text>
                 <Text style={styles.rowSub}>{(e.date || e.createdAt || "").split("T")[0]} · {e.category}</Text>
               </View>
-              <Text style={[styles.rowAmt, { color: colors.danger }]}>${fmt(e.amount)}</Text>
+              <Text style={[styles.rowAmt, { color: "#EF4444" }]}>${fmt(e.amount)}</Text>
             </View>
           )}
         />
@@ -126,9 +126,9 @@ export default function ContabilidadScreen() {
           <View style={styles.modalBg}>
             <View style={styles.modalCard}>
               <Text style={styles.modalTitle}>Registrar Egreso</Text>
-              <TextInput style={styles.input} value={form.date} onChangeText={v => setForm(f=>({...f,date:v}))} placeholder="Fecha (YYYY-MM-DD)" placeholderTextColor={colors.textMuted}/>
-              <TextInput style={styles.input} value={form.concept} onChangeText={v => setForm(f=>({...f,concept:v}))} placeholder="Concepto *" placeholderTextColor={colors.textMuted}/>
-              <TextInput style={styles.input} value={form.amount} onChangeText={v => setForm(f=>({...f,amount:v}))} placeholder="Monto CUP *" keyboardType="decimal-pad" placeholderTextColor={colors.textMuted}/>
+              <TextInput style={styles.input} value={form.date} onChangeText={v => setForm(f=>({...f,date:v}))} placeholder="Fecha (YYYY-MM-DD)" placeholderTextColor={"#1E293B"Muted}/>
+              <TextInput style={styles.input} value={form.concept} onChangeText={v => setForm(f=>({...f,concept:v}))} placeholder="Concepto *" placeholderTextColor={"#1E293B"Muted}/>
+              <TextInput style={styles.input} value={form.amount} onChangeText={v => setForm(f=>({...f,amount:v}))} placeholder="Monto CUP *" keyboardType="decimal-pad" placeholderTextColor={"#1E293B"Muted}/>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
                 <View style={{ flexDirection: "row", gap: 6 }}>
                   {EXPENSE_CATS.map(c => (
@@ -155,31 +155,31 @@ export default function ContabilidadScreen() {
 }
 
 const styles = StyleSheet.create({
-  wrap:          { flex: 1, backgroundColor: colors.bg },
-  tabRow:        { flexDirection: "row", backgroundColor: "#f0ebe4", margin: 12, borderRadius: 10, padding: 4 },
+  wrap:          { flex: 1, backgroundColor: "#F8FAFC" },
+  tabRow:        { flexDirection: "row", backgroundColor: "#f0ebe4", margin: 12, borderRadius: 14, padding: 4 },
   tabBtn:        { flex: 1, paddingVertical: 8, alignItems: "center", borderRadius: 7 },
-  tabBtnActive:  { backgroundColor: colors.primary },
-  tabText:       { fontSize: 13, fontWeight: "600", color: colors.textMuted },
+  tabBtnActive:  { backgroundColor: "#3B82F6" },
+  tabText:       { fontSize: 13, fontWeight: "600", color: "#1E293B"Muted },
   tabTextActive: { color: "#fff" },
-  summaryBox:    { backgroundColor: "#fff", borderRadius: 12, borderWidth: 1, borderColor: colors.border, padding: 16, marginBottom: 12 },
-  summaryTitle:  { fontWeight: "700", fontSize: 15, color: colors.text, marginBottom: 12 },
-  summaryRow:    { flexDirection: "row", justifyContent: "space-between", paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.border },
-  summaryLabel:  { fontSize: 14, color: colors.text },
+  summaryBox:    { backgroundColor: "#fff", borderRadius: 12, borderWidth: 1, borderColor: "#E2E8F0", padding: 16, marginBottom: 12 },
+  summaryTitle:  { fontWeight: "700", fontSize: 15, color: "#1E293B", marginBottom: 12 },
+  summaryRow:    { flexDirection: "row", justifyContent: "space-between", paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: "#E2E8F0" },
+  summaryLabel:  { fontSize: 14, color: "#1E293B" },
   summaryValue:  { fontSize: 14, fontWeight: "700" },
-  addBtn:        { backgroundColor: colors.primary, borderRadius: 10, paddingVertical: 13, alignItems: "center" },
+  addBtn:        { backgroundColor: "#3B82F6", borderRadius: 14, paddingVertical: 13, alignItems: "center" },
   addBtnText:    { color: "#fff", fontWeight: "700", fontSize: 15 },
-  row:           { flexDirection: "row", backgroundColor: "#fff", borderRadius: 10, borderWidth: 1, borderColor: colors.border, padding: 12, marginBottom: 8, alignItems: "center" },
-  rowPrimary:    { fontWeight: "600", fontSize: 13, color: colors.text },
-  rowSub:        { fontSize: 11, color: colors.textMuted, marginTop: 2 },
-  rowAmt:        { fontWeight: "800", fontSize: 15, color: colors.text },
+  row:           { flexDirection: "row", backgroundColor: "#fff", borderRadius: 14, borderWidth: 1, borderColor: "#E2E8F0", padding: 12, marginBottom: 8, alignItems: "center" },
+  rowPrimary:    { fontWeight: "600", fontSize: 13, color: "#1E293B" },
+  rowSub:        { fontSize: 11, color: "#1E293B"Muted, marginTop: 2 },
+  rowAmt:        { fontWeight: "800", fontSize: 15, color: "#1E293B" },
   modalBg:       { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
   modalCard:     { backgroundColor: "#fff", borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 20 },
-  modalTitle:    { fontWeight: "800", fontSize: 16, marginBottom: 14, color: colors.text },
-  input:         { borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 9, fontSize: 13, backgroundColor: colors.bg, marginBottom: 10, color: colors.text },
-  chip:          { borderWidth: 1, borderColor: colors.border, borderRadius: 20, paddingHorizontal: 12, paddingVertical: 6 },
-  chipActive:    { backgroundColor: colors.primary, borderColor: colors.primary },
-  chipText:      { fontSize: 12, fontWeight: "600", color: colors.text },
+  modalTitle:    { fontWeight: "800", fontSize: 16, marginBottom: 14, color: "#1E293B" },
+  input:         { borderWidth: 1, borderColor: "#E2E8F0", borderRadius: 12, paddingHorizontal: 10, paddingVertical: 9, fontSize: 13, backgroundColor: "#F8FAFC", marginBottom: 10, color: "#1E293B" },
+  chip:          { borderWidth: 1, borderColor: "#E2E8F0", borderRadius: 20, paddingHorizontal: 12, paddingVertical: 6 },
+  chipActive:    { backgroundColor: "#3B82F6", borderColor: "#3B82F6" },
+  chipText:      { fontSize: 12, fontWeight: "600", color: "#1E293B" },
   modalActions:  { flexDirection: "row", gap: 8, justifyContent: "flex-end", marginTop: 12 },
-  btnPrimary:    { backgroundColor: colors.primary, paddingVertical: 10, paddingHorizontal: 18, borderRadius: 8 },
-  btnSecondary:  { backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.border, paddingVertical: 10, paddingHorizontal: 14, borderRadius: 8 },
+  btnPrimary:    { backgroundColor: "#3B82F6", paddingVertical: 10, paddingHorizontal: 18, borderRadius: 8 },
+  btnSecondary:  { backgroundColor: "#F8FAFC", borderWidth: 1, borderColor: "#E2E8F0", paddingVertical: 10, paddingHorizontal: 14, borderRadius: 8 },
 });

@@ -117,7 +117,7 @@ export default function POSScreen() {
         <TextInput
           style={styles.search}
           placeholder="Buscar producto..."
-          placeholderTextColor={colors.textMuted}
+          placeholderTextColor={"#1E293B"Muted}
           value={search}
           onChangeText={setSearch}
         />
@@ -145,7 +145,7 @@ export default function POSScreen() {
                 >
                   <Text style={styles.qtyBtnText}>−</Text>
                 </TouchableOpacity>
-                <Text style={[styles.qtyVal, q > 0 && { color: colors.primary }]}>{q}</Text>
+                <Text style={[styles.qtyVal, q > 0 && { color: "#3B82F6" }]}>{q}</Text>
                 <TouchableOpacity style={styles.qtyBtnPlus} onPress={() => setQty(p, q + 1)}>
                   <Text style={{ color: "#fff", fontSize: 18, fontWeight: "700" }}>+</Text>
                 </TouchableOpacity>
@@ -191,10 +191,10 @@ export default function POSScreen() {
         {/* Datos de transferencia */}
         {needsTransfer && (
           <View style={{ gap: 6, marginBottom: 8 }}>
-            <TextInput style={styles.input} placeholder="Nombre del cliente *" value={clientName} onChangeText={setClientName} placeholderTextColor={colors.textMuted}/>
+            <TextInput style={styles.input} placeholder="Nombre del cliente *" value={clientName} onChangeText={setClientName} placeholderTextColor={"#1E293B"Muted}/>
             <View style={{ flexDirection: "row", gap: 6 }}>
-              <TextInput style={[styles.input, { flex: 1, fontFamily: "monospace" }]} placeholder="NIT *" value={clientNit} onChangeText={setClientNit} maxLength={11} keyboardType="numeric" placeholderTextColor={colors.textMuted}/>
-              <TextInput style={[styles.input, { flex: 1 }]} placeholder="Teléfono *" value={clientPhone} onChangeText={setClientPhone} keyboardType="phone-pad" placeholderTextColor={colors.textMuted}/>
+              <TextInput style={[styles.input, { flex: 1, fontFamily: "monospace" }]} placeholder="NIT *" value={clientNit} onChangeText={setClientNit} maxLength={11} keyboardType="numeric" placeholderTextColor={"#1E293B"Muted}/>
+              <TextInput style={[styles.input, { flex: 1 }]} placeholder="Teléfono *" value={clientPhone} onChangeText={setClientPhone} keyboardType="phone-pad" placeholderTextColor={"#1E293B"Muted}/>
             </View>
           </View>
         )}
@@ -207,11 +207,11 @@ export default function POSScreen() {
             value={cashGiven}
             onChangeText={setCashGiven}
             keyboardType="decimal-pad"
-            placeholderTextColor={colors.textMuted}
+            placeholderTextColor={"#1E293B"Muted}
           />
         )}
         {payMethod === "efectivo" && cashGiven && change >= 0 && (
-          <Text style={{ color: colors.success, fontWeight: "700", fontSize: 13, marginBottom: 6 }}>
+          <Text style={{ color: "#10B981", fontWeight: "700", fontSize: 13, marginBottom: 6 }}>
             Cambio: ${fmt(change)}
           </Text>
         )}
@@ -233,36 +233,36 @@ export default function POSScreen() {
 }
 
 const styles = StyleSheet.create({
-  wrap:         { flex: 1, backgroundColor: colors.bg },
+  wrap:         { flex: 1, backgroundColor: "#F8FAFC" },
   offlineBanner:{ backgroundColor: "#8B1A1A", padding: 8, alignItems: "center" },
   offlineText:  { color: "#fff", fontSize: 12, fontWeight: "600" },
   searchWrap:   { padding: 12, paddingBottom: 6 },
-  search:       { borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 9, backgroundColor: "#fff", fontSize: 14, color: colors.text },
+  search:       { borderWidth: 1, borderColor: "#E2E8F0", borderRadius: 12, paddingHorizontal: 12, paddingVertical: 9, backgroundColor: "#fff", fontSize: 14, color: "#1E293B" },
   productList:  { flex: 1, paddingHorizontal: 12 },
-  productRow:   { flexDirection: "row", alignItems: "center", backgroundColor: "#fff", borderRadius: 10, borderWidth: 1, borderColor: colors.border, padding: 12, marginBottom: 8 },
-  productName:  { fontWeight: "700", fontSize: 14, color: colors.text },
-  productSub:   { fontSize: 12, color: colors.textMuted, marginTop: 2 },
+  productRow:   { flexDirection: "row", alignItems: "center", backgroundColor: "#fff", borderRadius: 14, borderWidth: 1, borderColor: "#E2E8F0", padding: 12, marginBottom: 8 },
+  productName:  { fontWeight: "700", fontSize: 14, color: "#1E293B" },
+  productSub:   { fontSize: 12, color: "#1E293B"Muted, marginTop: 2 },
   qtyRow:       { flexDirection: "row", alignItems: "center", gap: 6 },
-  qtyBtn:       { width: 28, height: 28, borderRadius: 7, backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.border, alignItems: "center", justifyContent: "center" },
+  qtyBtn:       { width: 28, height: 28, borderRadius: 7, backgroundColor: "#F8FAFC", borderWidth: 1, borderColor: "#E2E8F0", alignItems: "center", justifyContent: "center" },
   qtyBtnDisabled: { opacity: 0.35 },
-  qtyBtnText:   { fontSize: 18, fontWeight: "700", color: colors.text },
-  qtyBtnPlus:   { width: 28, height: 28, borderRadius: 7, backgroundColor: colors.primary, alignItems: "center", justifyContent: "center" },
-  qtyVal:       { width: 24, textAlign: "center", fontSize: 15, fontWeight: "800", color: colors.text },
-  cartBox:      { backgroundColor: "#fff", borderTopWidth: 1, borderTopColor: colors.border, padding: 12 },
+  qtyBtnText:   { fontSize: 18, fontWeight: "700", color: "#1E293B" },
+  qtyBtnPlus:   { width: 28, height: 28, borderRadius: 7, backgroundColor: "#3B82F6", alignItems: "center", justifyContent: "center" },
+  qtyVal:       { width: 24, textAlign: "center", fontSize: 15, fontWeight: "800", color: "#1E293B" },
+  cartBox:      { backgroundColor: "#fff", borderTopWidth: 1, borderTopColor: "#E2E8F0", padding: 12 },
   cartHeader:   { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8 },
-  cartTitle:    { fontWeight: "700", fontSize: 15, color: colors.text },
-  cartBadge:    { backgroundColor: colors.primary, borderRadius: 20, paddingHorizontal: 8, paddingVertical: 1 },
+  cartTitle:    { fontWeight: "700", fontSize: 15, color: "#1E293B" },
+  cartBadge:    { backgroundColor: "#3B82F6", borderRadius: 20, paddingHorizontal: 8, paddingVertical: 1 },
   cartBadgeText:{ color: "#fff", fontSize: 12, fontWeight: "700" },
   cartLine:     { flexDirection: "row", justifyContent: "space-between", marginBottom: 4 },
-  cartLineText: { fontSize: 12, color: colors.text },
-  cartLineAmt:  { fontSize: 12, fontWeight: "700", color: colors.text },
+  cartLineText: { fontSize: 12, color: "#1E293B" },
+  cartLineAmt:  { fontSize: 12, fontWeight: "700", color: "#1E293B" },
   payRow:       { flexDirection: "row", gap: 8, marginVertical: 8 },
-  payBtn:       { flex: 1, borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingVertical: 8, alignItems: "center" },
-  payBtnActive: { backgroundColor: colors.primary, borderColor: colors.primary },
-  payBtnText:   { fontSize: 12, fontWeight: "600", color: colors.text },
-  input:        { borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, fontSize: 13, backgroundColor: colors.bg, color: colors.text },
+  payBtn:       { flex: 1, borderWidth: 1, borderColor: "#E2E8F0", borderRadius: 12, paddingVertical: 8, alignItems: "center" },
+  payBtnActive: { backgroundColor: "#3B82F6", borderColor: "#3B82F6" },
+  payBtnText:   { fontSize: 12, fontWeight: "600", color: "#1E293B" },
+  input:        { borderWidth: 1, borderColor: "#E2E8F0", borderRadius: 12, paddingHorizontal: 10, paddingVertical: 8, fontSize: 13, backgroundColor: "#F8FAFC", color: "#1E293B" },
   footer:       { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 6 },
-  total:        { fontSize: 17, fontWeight: "800", color: colors.text },
-  checkoutBtn:  { backgroundColor: colors.primary, paddingVertical: 11, paddingHorizontal: 22, borderRadius: 10 },
+  total:        { fontSize: 17, fontWeight: "800", color: "#1E293B" },
+  checkoutBtn:  { backgroundColor: "#3B82F6", paddingVertical: 11, paddingHorizontal: 22, borderRadius: 10 },
   checkoutText: { color: "#fff", fontWeight: "700", fontSize: 14 },
 });
