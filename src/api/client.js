@@ -1,4 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { emitSessionExpired } from "./sessionEvents";
 
 const API_BASE_URL = "https://cubagest-backend-production.up.railway.app/api";
 const TOKEN_KEY = "cubagest_token";
@@ -53,6 +54,17 @@ export async function apiFetch(path, opts = {}) {
     });
     clearTimeout(timeout);
     if (res.status === 204) return null;
+
+    // Token expirado o inválido — limpiar sesión y avisar a la app.
+    // Igual que en la web: no forzamos ningún reinicio de la app, solo
+    // avisamos vía evento para que el AuthContext saque al usuario a
+    // Login sin interrumpir una sincronización en curso.
+    if (res.status === 401) {
+      await setToken(null);
+      emitSessionExpired();
+      throw new Error("Sesión expirada");
+    }
+
     const data = await res.json();
     if (!res.ok) throw new Error(data?.error || `Error ${res.status}`);
     return data;

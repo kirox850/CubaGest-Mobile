@@ -3,6 +3,18 @@ import { apiFetch } from "./client";
 export const AuthAPI = {
   login:    (email, password) => apiFetch("/auth/login", { method:"POST", body:{ email, password }, auth:false }),
   me:       () => apiFetch("/auth/me"),
+  refresh:  () => apiFetch("/auth/refresh", { method:"POST" }),
+};
+
+// ─── Planes y suscripción ─────────────────────────────────────────────────────
+export const PlanAPI = {
+  get: () => apiFetch("/plan"),
+};
+
+export const SubscriptionAPI = {
+  status:          () => apiFetch("/subscription/status"),
+  authorizeQvapay: (plan) => apiFetch("/subscription/authorize", { method:"POST", body:{ plan } }),
+  cancel:          () => apiFetch("/subscription/cancel", { method:"DELETE" }),
 };
 
 export const DashboardAPI = {
