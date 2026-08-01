@@ -1,7 +1,8 @@
-import React, { createContext, useContext, useEffect, useState } from "react";
+import React, { createContext, useContext, useEffect, useState, useRef } from "react";
 import NetInfo from "@react-native-community/netinfo";
 import { getToken, setToken as saveToken, getCachedUser, setCachedUser } from "../api/client";
 import { AuthAPI } from "../api/endpoints";
+import { onSessionExpired } from "../api/sessionEvents";
 
 const AuthContext = createContext(null);
 
@@ -17,6 +18,33 @@ export function AuthProvider({ children }) {
     });
     return unsub;
   }, []);
+
+  // Si el token se invalida en cualquier momento (401 de apiFetch), volvemos
+  // a la pantalla de login sin recargar nada, igual que en la web.
+  useEffect(() => {
+    return onSessionExpired(() => setUser(null));
+  }, []);
+
+  // Renovar token automáticamente al recuperar conexión (igual que la web).
+  // Si el backend aún no expone /auth/refresh, esto falla en silencio y no
+  // afecta la sesión actual — el usuario sigue con su token vigente.
+  const didMount = useRef(false);
+  useEffect(() => {
+    if (!didMount.current) { didMount.current = true; return; }
+    if (!online || !user) return;
+    (async () => {
+      try {
+        const data = await AuthAPI.refresh();
+        if (data?.token) {
+          await saveToken(data.token);
+          await setCachedUser(data.user);
+          setUser(data.user);
+        }
+      } catch {
+        // 401 ya disparó cubagest-session-expired vía apiFetch si aplicaba
+      }
+    })();
+  }, [online]);
 
   // Restore session
   useEffect(() => {
