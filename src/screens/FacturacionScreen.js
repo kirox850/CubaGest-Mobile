@@ -79,7 +79,7 @@ export default function FacturacionScreen() {
       <TextInput
         style={styles.search}
         placeholder="Buscar por No. o cliente..."
-        placeholderTextColor={"#1E293B"Muted}
+        placeholderTextColor={colors.textMuted}
         value={search}
         onChangeText={setSearch}
       />
@@ -165,9 +165,9 @@ export default function FacturacionScreen() {
             <View style={styles.modalCard}>
               <Text style={styles.modalTitle}>Editar datos de factura</Text>
               <Text style={styles.note}>Solo se pueden editar datos del cliente y método de pago.</Text>
-              <TextInput style={styles.input} value={editForm.clientName} onChangeText={v => setEditForm(f => ({...f,clientName:v}))} placeholder="Nombre del cliente" placeholderTextColor={"#1E293B"Muted}/>
-              <TextInput style={styles.input} value={editForm.clientNit} onChangeText={v => setEditForm(f => ({...f,clientNit:v}))} placeholder="NIT" keyboardType="numeric" maxLength={11} placeholderTextColor={"#1E293B"Muted}/>
-              <TextInput style={styles.input} value={editForm.clientPhone} onChangeText={v => setEditForm(f => ({...f,clientPhone:v}))} placeholder="Teléfono" keyboardType="phone-pad" placeholderTextColor={"#1E293B"Muted}/>
+              <TextInput style={styles.input} value={editForm.clientName} onChangeText={v => setEditForm(f => ({...f,clientName:v}))} placeholder="Nombre del cliente" placeholderTextColor={colors.textMuted}/>
+              <TextInput style={styles.input} value={editForm.clientNit} onChangeText={v => setEditForm(f => ({...f,clientNit:v}))} placeholder="NIT" keyboardType="numeric" maxLength={11} placeholderTextColor={colors.textMuted}/>
+              <TextInput style={styles.input} value={editForm.clientPhone} onChangeText={v => setEditForm(f => ({...f,clientPhone:v}))} placeholder="Teléfono" keyboardType="phone-pad" placeholderTextColor={colors.textMuted}/>
               <View style={styles.payRow}>
                 {PAY_METHODS.map(m => (
                   <TouchableOpacity key={m.id} style={[styles.payBtn, editForm.payMethod===m.id && styles.payBtnActive]} onPress={()=>setEditForm(f=>({...f,payMethod:m.id}))}>
@@ -197,7 +197,7 @@ const styles = StyleSheet.create({
   row:           { flexDirection: "row", backgroundColor: "#fff", borderRadius: 14, borderWidth: 1, borderColor: "#E2E8F0", padding: 12, marginBottom: 8 },
   invoice:       { fontWeight: "700", fontSize: 13, color: "#3B82F6", fontFamily: "monospace" },
   client:        { fontSize: 13, color: "#1E293B", marginTop: 2 },
-  date:          { fontSize: 11, color: "#1E293B"Muted },
+  date:          { fontSize: 11, color: colors.textMuted },
   amount:        { fontWeight: "800", fontSize: 15, color: "#1E293B" },
   modalBg:       { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
   modalCard:     { backgroundColor: "#fff", borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 20, maxHeight: "85%" },
@@ -205,7 +205,7 @@ const styles = StyleSheet.create({
   receipt:       { backgroundColor: "#F8FAFC", borderRadius: 12, padding: 14, marginBottom: 16 },
   receiptCenter: { textAlign: "center", fontWeight: "700", fontSize: 13, color: "#1E293B", marginBottom: 2, fontFamily: "monospace" },
   receiptLine:   { fontSize: 12, color: "#1E293B", fontFamily: "monospace", marginBottom: 2 },
-  receiptDivider:{ fontSize: 11, color: "#1E293B"Muted, fontFamily: "monospace", marginVertical: 4 },
+  receiptDivider:{ fontSize: 11, color: colors.textMuted, fontFamily: "monospace", marginVertical: 4 },
   modalActions:  { flexDirection: "row", gap: 8, justifyContent: "flex-end", marginTop: 8 },
   btnPrimary:    { backgroundColor: "#3B82F6", paddingVertical: 10, paddingHorizontal: 18, borderRadius: 8 },
   btnSecondary:  { backgroundColor: "#F8FAFC", borderWidth: 1, borderColor: "#E2E8F0", paddingVertical: 10, paddingHorizontal: 14, borderRadius: 8 },

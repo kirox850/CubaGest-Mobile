@@ -117,7 +117,7 @@ export default function POSScreen() {
         <TextInput
           style={styles.search}
           placeholder="Buscar producto..."
-          placeholderTextColor={"#1E293B"Muted}
+          placeholderTextColor={colors.textMuted}
           value={search}
           onChangeText={setSearch}
         />
@@ -191,10 +191,10 @@ export default function POSScreen() {
         {/* Datos de transferencia */}
         {needsTransfer && (
           <View style={{ gap: 6, marginBottom: 8 }}>
-            <TextInput style={styles.input} placeholder="Nombre del cliente *" value={clientName} onChangeText={setClientName} placeholderTextColor={"#1E293B"Muted}/>
+            <TextInput style={styles.input} placeholder="Nombre del cliente *" value={clientName} onChangeText={setClientName} placeholderTextColor={colors.textMuted}/>
             <View style={{ flexDirection: "row", gap: 6 }}>
-              <TextInput style={[styles.input, { flex: 1, fontFamily: "monospace" }]} placeholder="NIT *" value={clientNit} onChangeText={setClientNit} maxLength={11} keyboardType="numeric" placeholderTextColor={"#1E293B"Muted}/>
-              <TextInput style={[styles.input, { flex: 1 }]} placeholder="Teléfono *" value={clientPhone} onChangeText={setClientPhone} keyboardType="phone-pad" placeholderTextColor={"#1E293B"Muted}/>
+              <TextInput style={[styles.input, { flex: 1, fontFamily: "monospace" }]} placeholder="NIT *" value={clientNit} onChangeText={setClientNit} maxLength={11} keyboardType="numeric" placeholderTextColor={colors.textMuted}/>
+              <TextInput style={[styles.input, { flex: 1 }]} placeholder="Teléfono *" value={clientPhone} onChangeText={setClientPhone} keyboardType="phone-pad" placeholderTextColor={colors.textMuted}/>
             </View>
           </View>
         )}
@@ -207,7 +207,7 @@ export default function POSScreen() {
             value={cashGiven}
             onChangeText={setCashGiven}
             keyboardType="decimal-pad"
-            placeholderTextColor={"#1E293B"Muted}
+            placeholderTextColor={colors.textMuted}
           />
         )}
         {payMethod === "efectivo" && cashGiven && change >= 0 && (
@@ -241,7 +241,7 @@ const styles = StyleSheet.create({
   productList:  { flex: 1, paddingHorizontal: 12 },
   productRow:   { flexDirection: "row", alignItems: "center", backgroundColor: "#fff", borderRadius: 14, borderWidth: 1, borderColor: "#E2E8F0", padding: 12, marginBottom: 8 },
   productName:  { fontWeight: "700", fontSize: 14, color: "#1E293B" },
-  productSub:   { fontSize: 12, color: "#1E293B"Muted, marginTop: 2 },
+  productSub:   { fontSize: 12, color: colors.textMuted, marginTop: 2 },
   qtyRow:       { flexDirection: "row", alignItems: "center", gap: 6 },
   qtyBtn:       { width: 28, height: 28, borderRadius: 7, backgroundColor: "#F8FAFC", borderWidth: 1, borderColor: "#E2E8F0", alignItems: "center", justifyContent: "center" },
   qtyBtnDisabled: { opacity: 0.35 },

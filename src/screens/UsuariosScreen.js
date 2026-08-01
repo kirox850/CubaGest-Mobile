@@ -110,7 +110,7 @@ const styles = StyleSheet.create({
   addBtnText: { color: "#fff", fontWeight: "700", fontSize: 13 },
   row: { flexDirection: "row", backgroundColor: "#fff", borderRadius: 14, borderWidth: 1, borderColor: "#E2E8F0", padding: 12, marginBottom: 8, alignItems: "center" },
   name: { fontWeight: "700", fontSize: 14, color: "#1E293B" },
-  email: { fontSize: 12, color: "#1E293B"Muted, marginTop: 2 },
+  email: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
   deactivateLink: { color: "#EF4444", fontSize: 12, fontWeight: "600" },
   modalBg: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "center", padding: 24 },
   modalCard: { backgroundColor: "#fff", borderRadius: 14, padding: 20 },

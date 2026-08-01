@@ -184,7 +184,7 @@ export default function InventarioScreen() {
   const Field = ({ label, ...props }) => (
     <View style={{ marginBottom: 10 }}>
       <Text style={styles.fieldLabel}>{label}</Text>
-      <TextInput style={styles.fieldInput} placeholderTextColor={"#1E293B"Muted} {...props} />
+      <TextInput style={styles.fieldInput} placeholderTextColor={colors.textMuted} {...props} />
     </View>
   );
 
@@ -204,7 +204,7 @@ export default function InventarioScreen() {
       <TextInput
         style={styles.search}
         placeholder="Buscar por nombre o código..."
-        placeholderTextColor={"#1E293B"Muted}
+        placeholderTextColor={colors.textMuted}
         value={search}
         onChangeText={setSearch}
       />
@@ -284,7 +284,7 @@ export default function InventarioScreen() {
             <TextInput
               style={styles.qtyInput}
               placeholder="Cantidad"
-              placeholderTextColor={"#1E293B"Muted}
+              placeholderTextColor={colors.textMuted}
               keyboardType="numeric"
               value={qty}
               onChangeText={setQty}
@@ -294,7 +294,7 @@ export default function InventarioScreen() {
                 style={styles.cancelBtn}
                 onPress={() => setSelected(null)}
               >
-                <Text style={{ color: "#1E293B"Muted }}>Cancelar</Text>
+                <Text style={{ color: colors.textMuted }}>Cancelar</Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.saveBtn} onPress={saveAdjust}>
                 <Text style={{ color: "#fff", fontWeight: "700" }}>Guardar</Text>
@@ -386,7 +386,7 @@ export default function InventarioScreen() {
                   onPress={() => setProductModal(false)}
                   disabled={saving}
                 >
-                  <Text style={{ color: "#1E293B"Muted }}>Cancelar</Text>
+                  <Text style={{ color: colors.textMuted }}>Cancelar</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[styles.saveBtn, saving && { opacity: 0.6 }]}
@@ -443,7 +443,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   name: { fontWeight: "700", fontSize: 14, color: "#1E293B" },
-  code: { fontSize: 12, color: "#1E293B"Muted, marginTop: 2 },
+  code: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
   hint: { fontSize: 10, color: "#E2E8F0", marginTop: 2 },
   price: { fontWeight: "700", color: "#1E293B", marginBottom: 4 },
   deleteLink: { fontSize: 11, color: "#EF4444", marginTop: 6 },
@@ -507,7 +507,7 @@ const styles = StyleSheet.create({
   fieldLabel: {
     fontSize: 12,
     fontWeight: "600",
-    color: "#1E293B"Muted,
+    color: colors.textMuted,
     textTransform: "uppercase",
     marginBottom: 4,
   },
