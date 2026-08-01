@@ -67,7 +67,7 @@ export default function ContabilidadScreen() {
       {tab === "resumen" && (
         <ScrollView contentContainerStyle={{ padding: 12 }}>
           <View style={styles.summaryBox}>
-            <Text style={styles.summaryTitle}>📋 Resumen ONAT</Text>
+            <Text style={styles.summaryTitle}>📋 Resumen</Text>
             {[
               ["Ingresos brutos", totalIncome, "#1A7A3C"],
               ["Total egresos",   totalExp,    "#EF4444"],

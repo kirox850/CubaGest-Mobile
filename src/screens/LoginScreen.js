@@ -87,8 +87,6 @@ export default function LoginScreen() {
               <Text style={styles.linkText}>Crear mi negocio (primera vez)</Text>
             </TouchableOpacity>
           </View>
-
-          <Text style={styles.legal}>Conforme a Resolución 286/2019 MINFIN · Ley 149/2022</Text>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -132,5 +130,4 @@ const styles = StyleSheet.create({
   btnText:    { color: "#fff", fontWeight: "800", fontSize: 15 },
   linkBtn:    { marginTop: 16, alignItems: "center" },
   linkText:   { color: colors.primary, fontWeight: "600", fontSize: 14 },
-  legal:      { marginTop: 28, fontSize: 10, color: "rgba(255,255,255,0.25)", textAlign: "center" },
 });
