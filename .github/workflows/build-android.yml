@@ -26,7 +26,7 @@ jobs:
 
       - name: Generate Android project
         run: |
-          npx react-native@0.74.5 init temp_project --version 0.74.5 --template react-native-template-typescript --skip-install
+          npx react-native@0.74.5 init temp_project --version 0.74.5 --skip-install
           cp -r temp_project/android .
           rm -rf temp_project
 
@@ -47,4 +47,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: CubaGest-Android-v${{ github.run_number }}
-          path: android/app/build/outputs/ap
+          path: android/app/build/outputs/apk/release/app-release-unsigned.apk
+          retention-days: 30
