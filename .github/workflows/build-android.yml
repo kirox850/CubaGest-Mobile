@@ -1,9 +1,10 @@
 name: Build Android APK
 
+# Solo corre cuando tú lo disparas a mano desde la pestaña Actions de
+# GitHub ("Run workflow") — NO en cada push a main. Un build de APK tarda
+# varios minutos y no siempre quieres uno por cada commit.
 on:
-  push:
-    branches: [main]
-  workflow_dispatch:
+  workflow_dispatch: {}
 
 jobs:
   build:
