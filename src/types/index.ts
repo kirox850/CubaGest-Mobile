@@ -88,7 +88,7 @@ export interface DashboardSummary {
   totalExpenses: number;
   netProfit: number;
   salesCount: number;
-  lowStockProducts: Product[];
+  lowStock: Product[];
 }
 
 export interface PlanInfo {
@@ -106,9 +106,17 @@ export interface PlanInfo {
   };
 }
 
+// El login real del backend devuelve accessToken (corta duración, 1h) +
+// refreshToken (7 días) + user — no un solo "token" como antes.
 export interface AuthResponse {
-  token: string;
+  accessToken: string;
+  refreshToken: string;
   user: User;
+}
+
+// POST /auth/refresh solo devuelve un accessToken nuevo, no el user.
+export interface RefreshResponse {
+  accessToken: string;
 }
 
 export interface ApiFetchOptions {
