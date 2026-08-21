@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
 import NetInfo from '@react-native-community/netinfo';
-import { getToken, setToken as saveToken, getCachedUser, setCachedUser } from '../api/client';
+import { getToken, setToken as saveToken, setRefreshToken as saveRefreshToken, getCachedUser, setCachedUser } from '../api/client';
 import { AuthAPI } from '../api/endpoints';
 import { onSessionExpired } from '../api/sessionEvents';
 import type { User } from '../types';
@@ -34,7 +34,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return onSessionExpired(() => setUser(null));
   }, []);
 
-  // Renovar token automáticamente al recuperar conexión (igual que la web).
+  // Renovar el accessToken automáticamente al recuperar conexión (igual que
+  // la web). /auth/refresh solo devuelve un accessToken nuevo, no el user
+  // — por eso aquí no se vuelve a guardar el user, solo el token.
   const didMount = useRef(false);
   useEffect(() => {
     if (!didMount.current) { didMount.current = true; return; }
@@ -42,10 +44,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     (async () => {
       try {
         const data = await AuthAPI.refresh();
-        if (data?.token) {
-          await saveToken(data.token);
-          await setCachedUser(data.user);
-          setUser(data.user);
+        if (data?.accessToken) {
+          await saveToken(data.accessToken);
         }
       } catch {
         // 401 ya disparó cubagest-session-expired vía apiFetch si aplicaba
@@ -87,8 +87,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const login = async (email: string, password: string) => {
-    const { token, user: u } = await AuthAPI.login(email, password);
-    await saveToken(token);
+    const { accessToken, refreshToken, user: u } = await AuthAPI.login(email, password);
+    await saveToken(accessToken);
+    await saveRefreshToken(refreshToken);
     await setCachedUser(u);
     setUser(u);
   };
