@@ -1,23 +1,34 @@
 import { apiFetch } from './client';
-import type { AuthResponse, User, Product, Sale, Expense, PlanInfo, DashboardSummary } from '../types';
+import { getRefreshToken } from './client';
+import type { AuthResponse, RefreshResponse, User, Product, Sale, Expense, PlanInfo, DashboardSummary } from '../types';
 
 export const AuthAPI = {
   login: (email: string, password: string): Promise<AuthResponse> =>
     apiFetch('/auth/login', { method: 'POST', body: { email, password }, auth: false }),
   me: (): Promise<User> => apiFetch('/auth/me'),
-  refresh: (): Promise<AuthResponse> => apiFetch('/auth/refresh', { method: 'POST' }),
+  // El backend exige el refreshToken en el body — antes no se mandaba nada
+  // y esta llamada siempre fallaba con 400.
+  refresh: async (): Promise<RefreshResponse> => {
+    const refreshToken = await getRefreshToken();
+    if (!refreshToken) throw new Error('No hay refresh token guardado');
+    return apiFetch('/auth/refresh', { method: 'POST', body: { refreshToken }, auth: false });
+  },
 };
 
 // ─── Planes y suscripción ─────────────────────────────────────────────────────
 export const PlanAPI = {
-  get: (): Promise<PlanInfo> => apiFetch('/plan'),
+  // La info del plan vive en GET /subscription (la raíz), no en /plan.
+  get: (): Promise<PlanInfo> => apiFetch('/subscription'),
 };
 
 export const SubscriptionAPI = {
   status: (): Promise<unknown> => apiFetch('/subscription/status'),
   authorizeQvapay: (plan: string): Promise<{ url?: string }> =>
     apiFetch('/subscription/authorize', { method: 'POST', body: { plan } }),
-  cancel: (): Promise<unknown> => apiFetch('/subscription/cancel', { method: 'DELETE' }),
+  // Cancela la renovación automática. La empresa sigue en su plan actual
+  // hasta que venza el período ya pagado (planExpiry) y ahí cae a free.
+  cancel: (): Promise<{ message: string; planExpiry?: string }> =>
+    apiFetch('/subscription/cancel', { method: 'DELETE' }),
 };
 
 export const DashboardAPI = {
@@ -60,11 +71,11 @@ export const SalesAPI = {
 export const ExpensesAPI = {
   list: (params: Record<string, string> = {}): Promise<Expense[]> => {
     const qs = new URLSearchParams(params).toString();
-    return apiFetch(`/expenses${qs ? `?${qs}` : ''}`);
+    return apiFetch(`/accounting/expenses${qs ? `?${qs}` : ''}`);
   },
   create: (expense: Partial<Expense>): Promise<Expense> =>
-    apiFetch('/expenses', { method: 'POST', body: expense as Record<string, unknown> }),
-  remove: (id: string): Promise<unknown> => apiFetch(`/expenses/${id}`, { method: 'DELETE' }),
+    apiFetch('/accounting/expenses', { method: 'POST', body: expense as Record<string, unknown> }),
+  remove: (id: string): Promise<unknown> => apiFetch(`/accounting/expenses/${id}`, { method: 'DELETE' }),
 };
 
 export const UsersAPI = {

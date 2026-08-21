@@ -4,6 +4,7 @@ import { API_BASE_URL } from './config';
 import type { ApiFetchOptions } from '../types';
 
 const TOKEN_KEY = 'cubagest_token';
+const REFRESH_TOKEN_KEY = 'cubagest_refresh_token';
 const USER_KEY = 'cubagest_user';
 
 export async function getToken(): Promise<string | null> {
@@ -15,7 +16,20 @@ export async function setToken(token: string | null): Promise<void> {
     await AsyncStorage.setItem(TOKEN_KEY, token);
   } else {
     await AsyncStorage.removeItem(TOKEN_KEY);
+    await AsyncStorage.removeItem(REFRESH_TOKEN_KEY);
     await AsyncStorage.removeItem(USER_KEY);
+  }
+}
+
+export async function getRefreshToken(): Promise<string | null> {
+  return AsyncStorage.getItem(REFRESH_TOKEN_KEY);
+}
+
+export async function setRefreshToken(refreshToken: string | null): Promise<void> {
+  if (refreshToken) {
+    await AsyncStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
+  } else {
+    await AsyncStorage.removeItem(REFRESH_TOKEN_KEY);
   }
 }
 
@@ -70,12 +84,19 @@ export async function apiFetch<T = unknown>(
       throw new Error('Sesión expirada');
     }
 
-    const data = (await res.json()) as T;
+    const raw = (await res.json()) as Record<string, unknown>;
     if (!res.ok) {
-      const errData = data as { error?: string };
-      throw new Error(errData?.error || `Error ${res.status}`);
+      throw new Error((raw?.error as string) || `Error ${res.status}`);
     }
-    return data;
+
+    // El backend siempre envuelve la respuesta con { ok, ... }. Algunos
+    // endpoints ponen el contenido bajo "data" (ej: { ok, data }), otros lo
+    // ponen como hermanos de "ok" (ej: { ok, accessToken, refreshToken,
+    // user }). Desenvolvemos en ambos casos para que cada pantalla reciba
+    // directamente lo que espera, en vez del sobre completo.
+    if ('data' in raw) return raw.data as T;
+    const { ok: _ok, ...rest } = raw;
+    return rest as T;
   } catch (e) {
     clearTimeout(timeout);
     if (e instanceof Error && e.name === 'AbortError') {
