@@ -110,17 +110,17 @@ export default function DashboardScreen() {
             />
             <StatCard
               label="Alertas Stock"
-              value={String(summary.lowStockProducts?.length || 0)}
-              sub={summary.lowStockProducts?.length ? 'Productos con stock bajo' : 'Todo OK'}
-              color={summary.lowStockProducts?.length ? '#F97316' : '#10B981'}
+              value={String(summary.lowStock?.length || 0)}
+              sub={summary.lowStock?.length ? 'Productos con stock bajo' : 'Todo OK'}
+              color={summary.lowStock?.length ? '#F97316' : '#10B981'}
               icon="📦"
             />
           </View>
 
-          {summary.lowStockProducts?.length > 0 && (
+          {summary.lowStock?.length > 0 && (
             <View style={styles.alertBox}>
               <Text style={styles.alertTitle}>⚠ Productos con stock bajo</Text>
-              {summary.lowStockProducts.map(p => (
+              {summary.lowStock.map(p => (
                 <Text key={p.id} style={styles.alertItem}>• {p.name} — {p.stock} {p.unit} (min: {p.minStock})</Text>
               ))}
             </View>
