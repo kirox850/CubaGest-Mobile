@@ -220,7 +220,7 @@ const styles = StyleSheet.create({
   btnPrimary: { backgroundColor: '#3B82F6', paddingVertical: 10, paddingHorizontal: 18, borderRadius: 8 },
   btnSecondary: { backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#E2E8F0', paddingVertical: 10, paddingHorizontal: 14, borderRadius: 8 },
   btnDanger: { backgroundColor: '#EF4444', paddingVertical: 10, paddingHorizontal: 14, borderRadius: 8 },
-  note: { fontSize: 12, color: '#c17a00', backgroundColor: '#fffbf0', borderRadius: 8, padding: 8, marginBottom: 12 },
+  note: { fontSize: 12, color: colors.warningTextDark, backgroundColor: colors.warningBg, borderRadius: 8, padding: 8, marginBottom: 12 },
   input: { borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 12, paddingHorizontal: 10, paddingVertical: 8, fontSize: 13, backgroundColor: '#F8FAFC', marginBottom: 10, color: '#1E293B' },
   payRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
   payBtn: { flex: 1, borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 12, paddingVertical: 8, alignItems: 'center' },

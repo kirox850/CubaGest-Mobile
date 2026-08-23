@@ -74,9 +74,9 @@ export default function ContabilidadScreen() {
           <View style={styles.summaryBox}>
             <Text style={styles.summaryTitle}>📋 Resumen</Text>
             {[
-              ['Ingresos brutos', totalIncome, '#1A7A3C'],
-              ['Total egresos', totalExp, '#EF4444'],
-              ['Utilidad neta', net, net >= 0 ? '#1A5C8B' : '#EF4444'],
+              ['Ingresos brutos', totalIncome, colors.success],
+              ['Total egresos', totalExp, colors.danger],
+              ['Utilidad neta', net, net >= 0 ? colors.primary : colors.danger],
             ].map(([label, value, color]) => (
               <View key={label as string} style={styles.summaryRow}>
                 <Text style={styles.summaryLabel}>{label}</Text>
@@ -161,7 +161,7 @@ export default function ContabilidadScreen() {
 
 const styles = StyleSheet.create({
   wrap: { flex: 1, backgroundColor: '#F8FAFC' },
-  tabRow: { flexDirection: 'row', backgroundColor: '#f0ebe4', margin: 12, borderRadius: 14, padding: 4 },
+  tabRow: { flexDirection: 'row', backgroundColor: colors.bgSecondary, margin: 12, borderRadius: 14, padding: 4 },
   tabBtn: { flex: 1, paddingVertical: 8, alignItems: 'center', borderRadius: 7 },
   tabBtnActive: { backgroundColor: '#3B82F6' },
   tabText: { fontSize: 13, fontWeight: '600', color: colors.textMuted },

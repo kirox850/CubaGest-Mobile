@@ -145,6 +145,6 @@ const styles = StyleSheet.create({
   cardSub: { fontSize: 11, color: colors.textMuted },
   cardIcon: { position: 'absolute', top: 12, right: 12, fontSize: 20 },
   alertBox: { margin: 12, backgroundColor: '#FFF7ED', borderWidth: 1, borderColor: '#FED7AA', borderRadius: 10, padding: 14 },
-  alertTitle: { fontWeight: '700', fontSize: 14, color: '#9A3412', marginBottom: 8 },
-  alertItem: { fontSize: 13, color: '#7C2D12', marginBottom: 4 },
+  alertTitle: { fontWeight: '700', fontSize: 14, color: colors.warningTextDark, marginBottom: 8 },
+  alertItem: { fontSize: 13, color: colors.warningTextDark, marginBottom: 4 },
 });

@@ -235,7 +235,7 @@ export default function POSScreen() {
 
 const styles = StyleSheet.create({
   wrap: { flex: 1, backgroundColor: '#F8FAFC' },
-  offlineBanner: { backgroundColor: '#8B1A1A', padding: 8, alignItems: 'center' },
+  offlineBanner: { backgroundColor: colors.danger, padding: 8, alignItems: 'center' },
   offlineText: { color: '#fff', fontSize: 12, fontWeight: '600' },
   searchWrap: { padding: 12, paddingBottom: 6 },
   search: { borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 9, backgroundColor: '#fff', fontSize: 14, color: '#1E293B' },
