@@ -27,6 +27,8 @@ export const colors = {
   warning: '#F97316',
   warningBg: '#FFF7ED',
   warningBorder: '#FED7AA',
+  // Texto legible sobre warningBg (usado en cajas de alerta/nota)
+  warningTextDark: '#9A3412',
 
   // Peligro
   danger: '#EF4444',
