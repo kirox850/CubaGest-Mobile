@@ -4,11 +4,13 @@ import {
   TouchableOpacity, Alert, Modal, ScrollView,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
-import { SalesAPI, ExpensesAPI } from '../api/endpoints';
+import { AccountingAPI, ExpensesAPI } from '../api/endpoints';
 import { useAuth } from '../context/AuthContext';
 import { colors } from '../config/theme';
+import { PAY_METHODS } from '../config/roles';
 import { EmptyState, ErrorBanner, Badge } from '../components/UI';
-import type { Sale, Expense } from '../types';
+import { shareCSV } from '../utils/csv';
+import type { AccountingSummary, IncomeRow, Expense } from '../types';
 
 const fmt = (n: number) => Number(n || 0).toFixed(2);
 const EXPENSE_CATS = ['Compras', 'Nomina', 'Servicios', 'Operaciones', 'Impuestos', 'Otros'];
@@ -16,7 +18,8 @@ const today = () => new Date().toISOString().split('T')[0];
 
 export default function ContabilidadScreen() {
   const { online } = useAuth();
-  const [sales, setSales] = useState<Sale[]>([]);
+  const [income, setIncome] = useState<IncomeRow[]>([]);
+  const [summary, setSummary] = useState<AccountingSummary | null>(null);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [tab, setTab] = useState('resumen');
   const [error, setError] = useState('');
@@ -27,9 +30,16 @@ export default function ContabilidadScreen() {
   const load = useCallback(async () => {
     try {
       setError('');
-      const [s, e] = await Promise.all([SalesAPI.list(), ExpensesAPI.list()]);
-      setSales(s);
-      setExpenses(e);
+      // Usa el summary contable del backend (paridad con la web) en lugar de
+      // recalcular localmente sobre la lista completa de ventas.
+      const [sum, inc, exp] = await Promise.all([
+        AccountingAPI.summary(),
+        AccountingAPI.income(),
+        ExpensesAPI.list(),
+      ]);
+      setSummary(sum);
+      setIncome(inc);
+      setExpenses(exp);
     } catch (err) {
       setError((err as Error).message);
     }
@@ -37,9 +47,9 @@ export default function ContabilidadScreen() {
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  const totalIncome = sales.filter(s => s.status === 'emitida').reduce((a, s) => a + Number(s.total), 0);
-  const totalExp = expenses.reduce((a, e) => a + Number(e.amount), 0);
-  const net = totalIncome - totalExp;
+  const totalIncome = summary ? Number(summary.totalRevenue) : 0;
+  const totalExp = summary ? Number(summary.totalExpenses) : expenses.reduce((a, e) => a + Number(e.amount), 0);
+  const net = summary ? Number(summary.netProfit) : totalIncome - totalExp;
 
   const addExpense = async () => {
     if (!form.concept || !form.amount) return Alert.alert('Error', 'Complete concepto y monto');
@@ -59,6 +69,16 @@ export default function ContabilidadScreen() {
   return (
     <View style={styles.wrap}>
       <ErrorBanner message={error} />
+
+      <TouchableOpacity
+        style={styles.csvBtn}
+        onPress={() => shareCSV('gastos', expenses as any, [
+          { key: 'date', label: 'Fecha' }, { key: 'category', label: 'Categoría' }, { key: 'concept', label: 'Concepto' },
+          { key: 'amount', label: 'Monto' }, { key: 'method', label: 'Método de pago' },
+        ])}
+      >
+        <Text style={styles.csvBtnText}>⇩ Exportar gastos (CSV)</Text>
+      </TouchableOpacity>
 
       {/* Tabs */}
       <View style={styles.tabRow}>
@@ -92,7 +112,7 @@ export default function ContabilidadScreen() {
 
       {tab === 'ingresos' && (
         <FlatList
-          data={sales.filter(s => s.status === 'emitida')}
+          data={income}
           keyExtractor={s => s.id}
           contentContainerStyle={{ padding: 12 }}
           ListEmptyComponent={<EmptyState text="No hay ingresos" />}
@@ -100,7 +120,7 @@ export default function ContabilidadScreen() {
             <View style={styles.row}>
               <View style={{ flex: 1 }}>
                 <Text style={styles.rowPrimary}>{s.invoiceNumber || s.id}</Text>
-                <Text style={styles.rowSub}>{(s.date || s.createdAt || '').split('T')[0]} · {s.clientName || s.client}</Text>
+                <Text style={styles.rowSub}>{(s.date || '').split('T')[0]} · {s.clientName || s.client} · {s.payMethod || ''}</Text>
               </View>
               <Text style={styles.rowAmt}>${fmt(Number(s.total))}</Text>
             </View>
@@ -134,6 +154,18 @@ export default function ContabilidadScreen() {
               <TextInput style={styles.input} value={form.date} onChangeText={v => setForm(f => ({ ...f, date: v }))} placeholder="Fecha (YYYY-MM-DD)" placeholderTextColor={colors.textMuted} />
               <TextInput style={styles.input} value={form.concept} onChangeText={v => setForm(f => ({ ...f, concept: v }))} placeholder="Concepto *" placeholderTextColor={colors.textMuted} />
               <TextInput style={styles.input} value={form.amount} onChangeText={v => setForm(f => ({ ...f, amount: v }))} placeholder="Monto CUP *" keyboardType="decimal-pad" placeholderTextColor={colors.textMuted} />
+              {/* Metodo de pago del egreso — paridad con la web */}
+              <View style={styles.payRow}>
+                {PAY_METHODS.map(m => (
+                  <TouchableOpacity
+                    key={m.id}
+                    style={[styles.chip, form.method === m.id && styles.chipActive]}
+                    onPress={() => setForm(f => ({ ...f, method: m.id }))}
+                  >
+                    <Text style={[styles.chipText, form.method === m.id && { color: '#fff' }]}>{m.label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
                 <View style={{ flexDirection: 'row', gap: 6 }}>
                   {EXPENSE_CATS.map(c => (
@@ -161,6 +193,8 @@ export default function ContabilidadScreen() {
 
 const styles = StyleSheet.create({
   wrap: { flex: 1, backgroundColor: '#F8FAFC' },
+  csvBtn: { backgroundColor: '#EFF6FF', borderWidth: 1, borderColor: '#BFDBFE', borderRadius: 10, paddingVertical: 9, alignItems: 'center', marginHorizontal: 12, marginBottom: 10 },
+  csvBtnText: { color: '#1D4ED8', fontWeight: '700', fontSize: 13 },
   tabRow: { flexDirection: 'row', backgroundColor: colors.bgSecondary, margin: 12, borderRadius: 14, padding: 4 },
   tabBtn: { flex: 1, paddingVertical: 8, alignItems: 'center', borderRadius: 7 },
   tabBtnActive: { backgroundColor: '#3B82F6' },
@@ -181,6 +215,7 @@ const styles = StyleSheet.create({
   modalCard: { backgroundColor: '#fff', borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 20 },
   modalTitle: { fontWeight: '800', fontSize: 16, marginBottom: 14, color: '#1E293B' },
   input: { borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 12, paddingHorizontal: 10, paddingVertical: 9, fontSize: 13, backgroundColor: '#F8FAFC', marginBottom: 10, color: '#1E293B' },
+  payRow: { flexDirection: 'row', gap: 8, marginBottom: 10 },
   chip: { borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 20, paddingHorizontal: 12, paddingVertical: 6 },
   chipActive: { backgroundColor: '#3B82F6', borderColor: '#3B82F6' },
   chipText: { fontSize: 12, fontWeight: '600', color: '#1E293B' },

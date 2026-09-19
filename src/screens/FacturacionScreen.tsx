@@ -6,18 +6,23 @@ import {
 import { useFocusEffect } from '@react-navigation/native';
 import { SalesAPI } from '../api/endpoints';
 import { useAuth } from '../context/AuthContext';
+import { useSync } from '../context/SyncContext';
 import { colors } from '../config/theme';
 import { PAY_METHODS } from '../config/roles';
 import { EmptyState, ErrorBanner, Badge } from '../components/UI';
+import { shareCSV } from '../utils/csv';
 import type { Sale } from '../types';
+import type { OfflineSale } from '../offline/offlineStore';
 
 const fmt = (n: number) => Number(n || 0).toFixed(2);
 
 export default function FacturacionScreen() {
-  const { user } = useAuth();
+  const { user, online } = useAuth();
+  const { offlineSales, syncNow, syncing, refresh: refreshSync } = useSync();
   const [sales, setSales] = useState<Sale[]>([]);
   const [search, setSearch] = useState('');
   const [error, setError] = useState('');
+  const [syncMsg, setSyncMsg] = useState('');
   const [viewInv, setViewInv] = useState<Sale | null>(null);
   const [editModal, setEditModal] = useState(false);
   const [editForm, setEditForm] = useState<Record<string, string>>({});
@@ -26,14 +31,29 @@ export default function FacturacionScreen() {
   const load = useCallback(async () => {
     try {
       setError('');
-      const list = await SalesAPI.list();
+      const list = online ? await SalesAPI.list() : [];
       setSales(list);
+      await refreshSync();
     } catch (err) {
       setError((err as Error).message);
     }
-  }, []);
+  }, [online, refreshSync]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
+
+  const pendingOffline = offlineSales.filter((s) => s.status === 'pending' || s.status === 'syncing');
+  const conflictOffline = offlineSales.filter((s) => s.status === 'conflict');
+
+  const handleManualSync = async () => {
+    setSyncMsg('');
+    const r = await syncNow(true);
+    if (r.error) setSyncMsg(r.error);
+    else if (r.attempted === 0) setSyncMsg('No hay ventas pendientes por sincronizar');
+    else {
+      setSyncMsg(`${r.synced} venta(s) sincronizada(s)${r.conflicts ? ` · ${r.conflicts} conflicto(s) de stock` : ''}`);
+      load();
+    }
+  };
 
   const filtered = sales.filter(s =>
     (s.invoiceNumber || s.id || '').toLowerCase().includes(search.toLowerCase()) ||
@@ -86,6 +106,46 @@ export default function FacturacionScreen() {
   return (
     <View style={styles.wrap}>
       <ErrorBanner message={error} />
+
+      <TouchableOpacity
+        style={styles.csvBtn}
+        onPress={() => shareCSV('ventas', sales as any, [
+          { key: 'invoiceNumber', label: 'Factura' }, { key: 'date', label: 'Fecha' }, { key: 'clientName', label: 'Cliente' },
+          { key: 'subtotal', label: 'Subtotal' }, { key: 'discountTotal', label: 'Descuento' }, { key: 'tax', label: 'Impuesto' },
+          { key: 'total', label: 'Total' }, { key: 'currency', label: 'Moneda' }, { key: 'payMethod', label: 'Método' },
+          { key: 'status', label: 'Estado' },
+        ])}
+      >
+        <Text style={styles.csvBtnText}>⇩ Exportar CSV (respaldo)</Text>
+      </TouchableOpacity>
+
+      {/* Ventas offline pendientes / con conflicto — paridad con la web */}
+      {(pendingOffline.length > 0 || conflictOffline.length > 0 || syncMsg) && (
+        <View style={styles.offlineBox}>
+          {syncMsg ? <Text style={styles.syncMsg}>{syncMsg}</Text> : null}
+          {pendingOffline.map((s: OfflineSale) => (
+            <View key={s.localId} style={styles.offlineRow}>
+              <Text style={styles.offlineId}>⏳ {s.localId}</Text>
+              <Text style={styles.offlineAmt}>${fmt(Number(s.total))}</Text>
+            </View>
+          ))}
+          {conflictOffline.map((s: OfflineSale) => (
+            <View key={s.localId} style={styles.offlineRow}>
+              <Text style={styles.offlineConflict}>⚠ {s.localId} — {s.conflictReason || 'Conflicto de stock'}</Text>
+              <Text style={styles.offlineAmt}>${fmt(Number(s.total))}</Text>
+            </View>
+          ))}
+          <TouchableOpacity
+            style={[styles.syncBtn, syncing && { opacity: 0.6 }]}
+            onPress={handleManualSync}
+            disabled={syncing || !online}
+          >
+            <Text style={styles.syncBtnText}>
+              {syncing ? 'Sincronizando...' : '⟳ Sincronizar ahora'}</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
       <TextInput
         style={styles.search}
         placeholder="Buscar por No. o cliente..."
@@ -98,7 +158,7 @@ export default function FacturacionScreen() {
         data={filtered}
         keyExtractor={s => s.id}
         contentContainerStyle={{ paddingBottom: 24 }}
-        ListEmptyComponent={<EmptyState text="No hay facturas" />}
+        ListEmptyComponent={<EmptyState text={online ? 'No hay facturas' : 'Sin conexión — mostrando solo ventas locales'} />}
         renderItem={({ item: s }) => (
           <TouchableOpacity style={[styles.row, s.status === 'anulada' && { opacity: 0.5 }]} onPress={() => setViewInv(s)}>
             <View style={{ flex: 1 }}>
@@ -203,6 +263,16 @@ export default function FacturacionScreen() {
 
 const styles = StyleSheet.create({
   wrap: { flex: 1, backgroundColor: '#F8FAFC', padding: 12 },
+  csvBtn: { backgroundColor: '#EFF6FF', borderWidth: 1, borderColor: '#BFDBFE', borderRadius: 10, paddingVertical: 9, alignItems: 'center', marginBottom: 10 },
+  csvBtnText: { color: '#1D4ED8', fontWeight: '700', fontSize: 13 },
+  offlineBox: { backgroundColor: '#EFF6FF', borderRadius: 12, borderWidth: 1, borderColor: '#BFDBFE', padding: 10, marginBottom: 10 },
+  offlineRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 3 },
+  offlineId: { fontSize: 12, fontWeight: '700', color: '#1D4ED8', fontFamily: 'monospace' },
+  offlineConflict: { fontSize: 11, fontWeight: '600', color: '#C2410C', flex: 1, marginRight: 8 },
+  offlineAmt: { fontSize: 12, fontWeight: '700', color: '#1E293B' },
+  syncMsg: { fontSize: 12, fontWeight: '600', color: '#1E40AF', marginBottom: 6 },
+  syncBtn: { backgroundColor: '#1D4ED8', borderRadius: 8, paddingVertical: 8, alignItems: 'center', marginTop: 6 },
+  syncBtnText: { color: '#fff', fontWeight: '700', fontSize: 12 },
   search: { borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 9, backgroundColor: '#fff', marginBottom: 12, fontSize: 14, color: '#1E293B' },
   row: { flexDirection: 'row', backgroundColor: '#fff', borderRadius: 14, borderWidth: 1, borderColor: '#E2E8F0', padding: 12, marginBottom: 8 },
   invoice: { fontWeight: '700', fontSize: 13, color: '#3B82F6', fontFamily: 'monospace' },

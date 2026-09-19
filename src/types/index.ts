@@ -8,6 +8,7 @@ export interface User {
   businessId: string;
   company?: Company;
   active?: boolean;
+  pending?: boolean; // cuenta creada por el admin que aún no establece contraseña
   lastLoginAt?: string;
   createdAt?: string;
 }
@@ -78,7 +79,8 @@ export interface Expense {
   concept: string;
   amount: number;
   category: string;
-  paymentMethod: string;
+  paymentMethod?: string;
+  method?: string;
   userId?: string;
   createdAt?: string;
 }
@@ -88,7 +90,155 @@ export interface DashboardSummary {
   totalExpenses: number;
   netProfit: number;
   salesCount: number;
+  todaySalesCount: number;
+  todaySalesTotal: number;
+  lowStockCount: number;
   lowStock: Product[];
+  chartDays: { date: string; total: number }[];
+}
+
+// ─── Ubicaciones e inventario multi-ubicación ──────────────────────────────
+export interface Location {
+  id: string;
+  companyId: string;
+  name: string;
+  type: 'almacen' | 'caja';
+  ownerUserId?: string | null;
+  active: boolean;
+  createdAt?: string;
+}
+
+export interface LocationStockItem extends Product {
+  stock: number; // stock EN esa ubicación
+}
+
+export interface LocationStock {
+  location: Location;
+  items: LocationStockItem[];
+}
+
+// ─── Cierre de caja ────────────────────────────────────────────────────────
+export interface ReadingItem {
+  productId: string;
+  productCode: string;
+  productName: string;
+  unit: string;
+  qty: number;
+}
+
+export interface InventoryReading {
+  id: string;
+  companyId: string;
+  locationId: string;
+  takenById: string;
+  takenBy?: { id: string; name: string };
+  type: 'apertura' | 'cierre';
+  notes?: string | null;
+  items: ReadingItem[];
+  createdAt: string;
+}
+
+export interface ClosingItem {
+  productId: string;
+  productCode: string;
+  productName: string;
+  unit: string;
+  price: number;
+  stockInitial: number;
+  stockSold: number;
+  stockExpected: number;
+  stockValidated: number;
+  shortage: number;
+  income: number;
+}
+
+export interface Closing {
+  id: string;
+  companyId: string;
+  locationId?: string;
+  initialReadingId: string;
+  closedById: string;
+  closedBy?: { id: string; name: string };
+  periodStart: string;
+  periodEnd: string;
+  totalSales: number;
+  totalIncome: number;
+  incomeEfectivo: number;
+  incomeTransferencia: number;
+  items: ClosingItem[];
+  notes?: string | null;
+  createdAt: string;
+}
+
+export interface ClosingPreview {
+  initialReading: { id: string; type: string; createdAt: string; notes?: string | null; locationId: string };
+  periodStart: string;
+  periodEnd: string;
+  totalSales: number;
+  totalIncome: number;
+  incomeEfectivo: number;
+  incomeTransferencia: number;
+  items: ClosingItem[];
+}
+
+// ─── Transferencias / envíos de stock ──────────────────────────────────────
+export interface TransferItem {
+  id: string;
+  transferId: string;
+  productId: string;
+  productCode: string;
+  productName: string;
+  unit: string;
+  qty: number;
+}
+
+export interface Transfer {
+  id: string;
+  companyId: string;
+  fromLocationId: string;
+  toLocationId: string;
+  requestedById: string;
+  requestedBy?: { id: string; name: string };
+  status: 'pendiente' | 'aprobado' | 'rechazado' | 'cancelado';
+  notes?: string | null;
+  rejectReason?: string | null;
+  items: TransferItem[];
+  createdAt: string;
+}
+
+// ─── Auditoría ─────────────────────────────────────────────────────────────
+export interface AuditLog {
+  id: string;
+  companyId: string;
+  userId?: string | null;
+  userName: string;
+  action: string;
+  entity: string;
+  entityId?: string | null;
+  detail?: unknown;
+  ip?: string | null;
+  createdAt: string;
+}
+
+// ─── Contabilidad ──────────────────────────────────────────────────────────
+// Shape exacto de GET /accounting/summary del backend.
+export interface AccountingSummary {
+  totalRevenue: number;
+  totalExpenses: number;
+  netProfit: number;
+  salesCount: number;
+  expensesCount: number;
+  period: { from: string | null; to: string | null };
+}
+
+export interface IncomeRow {
+  id: string;
+  invoiceNumber?: string;
+  date?: string;
+  clientName?: string;
+  client?: string;
+  payMethod?: string;
+  total: number;
 }
 
 export interface PlanInfo {
