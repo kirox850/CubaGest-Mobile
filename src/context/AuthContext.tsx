@@ -15,6 +15,16 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
+// Normaliza el usuario: si la caché (o una respuesta antigua) guardó el
+// sobre { user: {...} } en vez del usuario plano, lo extrae. Sin esto, un
+// usuario cacheado corrupto deja role=undefined y la app queda sin tabs.
+function normalizeUser(raw: unknown): User | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const u = raw as any;
+  if (!u.role && u.user && typeof u.user === 'object') return u.user as User;
+  return u as User;
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
@@ -63,9 +73,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const isOnline = !!netState.isConnected && netState.isInternetReachable !== false;
 
       if (!isOnline) {
-        // Offline: use cached user directly
-        const cached = await getCachedUser();
-        if (cached) setUser(cached as User);
+        // Offline: use cached user directly (normalizado por si la caché
+        // quedó con el sobre { user } de versiones anteriores)
+        const cached = normalizeUser(await getCachedUser());
+        if (cached) {
+          setUser(cached);
+          await setCachedUser(cached); // repara la caché corrupta
+        }
         else await saveToken(null); // no cache, force login
         setLoading(false);
         return;
@@ -73,13 +87,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       // Online: verify with server
       try {
-        const me = await AuthAPI.me();
-        await setCachedUser(me);
+        const me = normalizeUser(await AuthAPI.me());
+        if (me) await setCachedUser(me);
         setUser(me);
       } catch {
         // Server failed — try cache
-        const cached = await getCachedUser();
-        if (cached) setUser(cached as User);
+        const cached = normalizeUser(await getCachedUser());
+        if (cached) {
+          setUser(cached);
+          await setCachedUser(cached);
+        }
         else await saveToken(null);
       }
       setLoading(false);

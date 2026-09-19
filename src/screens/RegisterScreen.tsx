@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 import { useAuth } from '../context/AuthContext';
+import { AuthAPI } from '../api/endpoints';
 import { colors } from '../config/theme';
 import { ErrorBanner } from '../components/UI';
 
@@ -19,12 +20,24 @@ export default function RegisterScreen({ onBackToLogin }: { onBackToLogin: () =>
       setError('Complete al menos: nombre del negocio, su nombre, correo y contrasena');
       return;
     }
+    if (password.length < 8) {
+      setError('La contrasena debe tener al menos 8 caracteres');
+      return;
+    }
     setError('');
     setLoading(true);
     try {
-      // Nota: el backend actual no expone registro desde la app.
-      // Si lo agregas, reemplaza esto por la llamada real.
-      setError('El registro desde la app movil no esta habilitado. Usa la web.');
+      // Registro real contra POST /auth/register — igual que la web.
+      // Crea la empresa con trial de 30 días y devuelve tokens + user admin.
+      await AuthAPI.register({
+        companyName,
+        companyNit: companyNit || undefined,
+        name,
+        email,
+        password,
+      });
+      // Entrar directamente con la cuenta recién creada.
+      await login(email, password);
     } catch (err) {
       setError((err as Error).message);
     } finally {

@@ -1,4 +1,11 @@
 {
   "name": "CubaGest",
-  "displayName": "CubaGest"
+  "displayName": "CubaGest",
+  "expo": {
+    "name": "CubaGest",
+    "slug": "cubagest",
+    "version": "1.2.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light"
+  }
 }

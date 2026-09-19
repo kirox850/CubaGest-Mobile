@@ -1,23 +1,26 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TextInput,
   TouchableOpacity, Modal, Alert, ScrollView,
   KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
-import { ProductsAPI } from '../api/endpoints';
+import { ProductsAPI, LocationsAPI } from '../api/endpoints';
 import { useAuth } from '../context/AuthContext';
 import { colors } from '../config/theme';
+import { CAN_MANAGE_INVENTORY } from '../config/roles';
 import { Badge, EmptyState, ErrorBanner } from '../components/UI';
-import type { Product } from '../types';
-
-const CAN_MANAGE = ['admin', 'almacenista'];
+import { shareCSV } from '../utils/csv';
+import { cacheProducts } from '../offline/offlineStore';
+import type { Location, LocationStockItem, Product } from '../types';
 
 const EMPTY_PRODUCT = {
   code: '',
+  barcode: '',
+  currency: 'CUP',
   name: '',
   category: '',
-  unit: 'unidad',
+  unit: 'ud',
   price: '',
   cost: '',
   stock: '',
@@ -26,13 +29,17 @@ const EMPTY_PRODUCT = {
 
 export default function InventarioScreen() {
   const { user } = useAuth();
-  const canManage = CAN_MANAGE.includes(user?.role || '');
+  const canManage = CAN_MANAGE_INVENTORY.includes(user?.role || '');
+  const isAdmin = user?.role === 'admin';
 
-  const [products, setProducts] = useState<Product[]>([]);
+  const [locations, setLocations] = useState<Location[]>([]);
+  const [selectedLocId, setSelectedLocId] = useState<string>('');
+  const [products, setProducts] = useState<LocationStockItem[]>([]);
   const [search, setSearch] = useState('');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
 
-  const [selected, setSelected] = useState<Product | null>(null);
+  const [selected, setSelected] = useState<LocationStockItem | null>(null);
   const [qty, setQty] = useState('');
   const [type, setType] = useState<'entrada' | 'salida'>('entrada');
 
@@ -41,17 +48,54 @@ export default function InventarioScreen() {
   const [form, setForm] = useState(EMPTY_PRODUCT);
   const [saving, setSaving] = useState(false);
 
-  const load = useCallback(async () => {
+  const selectedLocName = locations.find((l) => l.id === selectedLocId)?.name || '';
+  const myLabel = !isAdmin && selectedLocName ? `Ubicación: ${selectedLocName}` : '';
+
+  const loadLocations = useCallback(async () => {
     try {
-      setError('');
-      const list = await ProductsAPI.list();
-      setProducts(list);
+      const locs = await LocationsAPI.list();
+      setLocations(locs);
+      setSelectedLocId((prev) => {
+        if (prev) return prev;
+        if (user?.role === 'almacenista') {
+          return locs.find((l) => l.type === 'almacen')?.id || '';
+        }
+        if (user?.role === 'cajero') {
+          return locs.find((l) => l.type === 'caja' && l.ownerUserId === user.id)?.id || '';
+        }
+        return locs.find((l) => l.type === 'almacen')?.id || locs[0]?.id || '';
+      });
     } catch (err) {
       setError((err as Error).message);
     }
-  }, []);
+  }, [user?.id, user?.role]);
 
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  const load = useCallback(async () => {
+    if (!selectedLocId) { setLoading(false); return; }
+    try {
+      setError('');
+      setLoading(true);
+      const { items } = await LocationsAPI.stock(selectedLocId);
+      setProducts(items);
+      // Cache offline: guardamos el stock de la ubicación operativa del
+      // usuario (cajero/almacenista), igual que hace la web para el POS.
+      if (user?.role !== 'admin') await cacheProducts(items);
+      setLoading(false);
+    } catch (err) {
+      setError((err as Error).message);
+      setLoading(false);
+    }
+  }, [selectedLocId, user?.role]);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadLocations();
+    }, [loadLocations]),
+  );
+
+  useEffect(() => {
+    load();
+  }, [load]);
 
   const filtered = products.filter(
     (p) =>
@@ -59,7 +103,7 @@ export default function InventarioScreen() {
       p.code.toLowerCase().includes(search.toLowerCase()),
   );
 
-  const openAdjust = (p: Product) => {
+  const openAdjust = (p: LocationStockItem) => {
     setSelected(p);
     setQty('');
     setType('entrada');
@@ -70,7 +114,14 @@ export default function InventarioScreen() {
     if (!n || n <= 0)
       return Alert.alert('Cantidad invalida', 'Ingrese una cantidad mayor a 0');
     try {
-      await ProductsAPI.adjustStock(selected!.id, type, n, 'Ajuste desde app movil');
+      // Endpoint real del backend: POST /locations/:id/adjust — el viejo
+      // /products/:id/adjust-stock ya no existe.
+      await LocationsAPI.adjust(selectedLocId, {
+        productId: selected!.id,
+        type,
+        qty: n,
+        reason: 'Ajuste desde app movil',
+      });
       setSelected(null);
       load();
     } catch (err) {
@@ -88,12 +139,14 @@ export default function InventarioScreen() {
     setEditing(p);
     setForm({
       code: p.code,
+      barcode: (p as any).barcode || '',
+      currency: (p as any).currency || 'CUP',
       name: p.name,
       category: p.category || '',
-      unit: p.unit || 'unidad',
+      unit: p.unit || 'ud',
       price: String(p.price),
       cost: String(p.cost || ''),
-      stock: String(p.stock),
+      stock: '',
       minStock: String(p.minStock || ''),
     });
     setProductModal(true);
@@ -114,12 +167,14 @@ export default function InventarioScreen() {
     try {
       const payload = {
         code: form.code.trim(),
+        barcode: (form.barcode || '').trim() || undefined,
+        currency: form.currency || 'CUP',
         name: form.name.trim(),
         category: form.category.trim(),
-        unit: form.unit.trim() || 'unidad',
+        unit: form.unit.trim() || 'ud',
         price,
         cost: Number(form.cost) || 0,
-        stock: Number(form.stock) || 0,
+        ...(editing ? {} : { stock: Number(form.stock) || 0 }),
         minStock: Number(form.minStock) || 0,
       };
 
@@ -171,12 +226,44 @@ export default function InventarioScreen() {
     <View style={styles.wrap}>
       <View style={styles.header}>
         <Text style={styles.title}>Inventario</Text>
-        {canManage && (
-          <TouchableOpacity style={styles.addBtn} onPress={openCreate}>
-            <Text style={styles.addBtnText}>+ Nuevo</Text>
+        <View style={{ flexDirection: 'row', gap: 8 }}>
+          <TouchableOpacity
+            style={[styles.addBtn, { backgroundColor: '#F1F5F9' }]}
+            onPress={() => shareCSV('inventario', products as any, [
+              { key: 'code', label: 'Código' }, { key: 'name', label: 'Producto' }, { key: 'category', label: 'Categoría' },
+              { key: 'unit', label: 'Unidad' }, { key: 'price', label: 'Precio' }, { key: 'currency', label: 'Moneda' },
+              { key: 'stock', label: 'Stock' }, { key: 'minStock', label: 'Mínimo' },
+            ])}
+          >
+            <Text style={[styles.addBtnText, { color: '#475569' }]}>CSV</Text>
           </TouchableOpacity>
-        )}
+          {canManage && (
+            <TouchableOpacity style={styles.addBtn} onPress={openCreate}>
+              <Text style={styles.addBtnText}>+ Nuevo</Text>
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
+
+      {/* Selector de ubicación (solo admin; el resto ve su ubicación fija) */}
+      {isAdmin && locations.length > 1 ? (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
+          <View style={styles.locRow}>
+            {locations.map((l) => (
+              <TouchableOpacity
+                key={l.id}
+                style={[styles.locChip, selectedLocId === l.id && styles.locChipActive]}
+                onPress={() => setSelectedLocId(l.id)}
+              >
+                <Text style={[styles.locChipText, selectedLocId === l.id && { color: '#fff' }]}>
+                  {l.name}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </ScrollView>
+      ) : null}
+      {myLabel ? <Text style={styles.locLabel}>{myLabel}</Text> : null}
 
       <ErrorBanner message={error} />
 
@@ -192,13 +279,13 @@ export default function InventarioScreen() {
         data={filtered}
         keyExtractor={(p) => p.id}
         contentContainerStyle={{ paddingBottom: 24 }}
-        ListEmptyComponent={<EmptyState text="No hay productos" />}
+        ListEmptyComponent={<EmptyState text={loading ? 'Cargando...' : 'No hay productos'} />}
         renderItem={({ item }) => {
           const low = Number(item.stock) <= Number(item.minStock);
           return (
             <TouchableOpacity
               style={styles.row}
-              onPress={() => openAdjust(item)}
+              onPress={() => canManage && openAdjust(item)}
               onLongPress={() => canManage && openEdit(item)}
             >
               <View style={{ flex: 1 }}>
@@ -207,7 +294,7 @@ export default function InventarioScreen() {
                   {item.code} · {item.category}
                 </Text>
                 {canManage && (
-                  <Text style={styles.hint}>Manten presionado para editar</Text>
+                  <Text style={styles.hint}>Toca para ajustar stock · Mantén para editar</Text>
                 )}
               </View>
               <View style={{ alignItems: 'flex-end' }}>
@@ -230,7 +317,7 @@ export default function InventarioScreen() {
         }}
       />
 
-      {/* Modal: Ajuste de stock */}
+      {/* Modal: Ajuste de stock en la ubicación seleccionada */}
       <Modal
         visible={!!selected}
         transparent
@@ -242,6 +329,9 @@ export default function InventarioScreen() {
             <Text style={styles.modalTitle}>
               Ajustar stock — {selected?.name}
             </Text>
+            {selectedLocName ? (
+              <Text style={styles.modalSub}>Ubicación: {selectedLocName}</Text>
+            ) : null}
             <View style={styles.typeRow}>
               {(['entrada', 'salida'] as const).map((t) => (
                 <TouchableOpacity
@@ -310,6 +400,12 @@ export default function InventarioScreen() {
                   editable={!editing}
                 />
                 <Field
+                  label="Codigo de barras"
+                  value={form.barcode}
+                  onChangeText={(v: string) => setForm((f) => ({ ...f, barcode: v }))}
+                  placeholder="Escanea o digita (opcional)"
+                />
+                <Field
                   label="Nombre *"
                   value={form.name}
                   onChangeText={(v: string) => setForm((f) => ({ ...f, name: v }))}
@@ -325,10 +421,10 @@ export default function InventarioScreen() {
                   label="Unidad de medida"
                   value={form.unit}
                   onChangeText={(v: string) => setForm((f) => ({ ...f, unit: v }))}
-                  placeholder="unidad / kg / litro..."
+                  placeholder="ud / kg / litro..."
                 />
                 <Field
-                  label="Precio de venta (CUP) *"
+                  label={`Precio de venta (${form.currency || 'CUP'}) *`}
                   value={form.price}
                   onChangeText={(v: string) => setForm((f) => ({ ...f, price: v }))}
                   placeholder="0.00"
@@ -401,6 +497,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
   },
   addBtnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
+  locRow: { flexDirection: 'row', gap: 8 },
+  locChip: {
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    backgroundColor: '#fff',
+  },
+  locChipActive: { backgroundColor: '#3B82F6', borderColor: '#3B82F6' },
+  locChipText: { fontSize: 12, fontWeight: '700', color: '#1E293B' },
+  locLabel: { fontSize: 12, color: colors.textMuted, marginBottom: 8, fontWeight: '600' },
   search: {
     borderWidth: 1,
     borderColor: '#E2E8F0',
@@ -423,7 +531,7 @@ const styles = StyleSheet.create({
   },
   name: { fontWeight: '700', fontSize: 14, color: '#1E293B' },
   code: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
-  hint: { fontSize: 10, color: '#E2E8F0', marginTop: 2 },
+  hint: { fontSize: 10, color: '#94A3B8', marginTop: 2 },
   price: { fontWeight: '700', color: '#1E293B', marginBottom: 4 },
   deleteLink: { fontSize: 11, color: '#EF4444', marginTop: 6 },
 
@@ -441,9 +549,10 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontWeight: '700',
     fontSize: 16,
-    marginBottom: 16,
+    marginBottom: 8,
     color: '#1E293B',
   },
+  modalSub: { fontSize: 12, color: '#3B82F6', fontWeight: '600', marginBottom: 12 },
   typeRow: { flexDirection: 'row', gap: 8, marginBottom: 14 },
   typeBtn: {
     flex: 1,
