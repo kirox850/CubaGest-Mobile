@@ -245,7 +245,7 @@ export default function AppNavigator() {
             // Header navy de marca con logo — idéntico al top header de la web
             headerTitle: () => (
               <View style={s.brandRow}>
-                <Image source={require('../assets/images/icon.png')} style={s.brandLogo} />
+                <Image source={require('../../assets/images/icon.png')} style={s.brandLogo} />
                 <Text style={s.brandName}>CubaGest</Text>
               </View>
             ),
