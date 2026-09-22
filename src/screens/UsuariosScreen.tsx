@@ -18,7 +18,7 @@ export default function UsuariosScreen() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [role, setRole] = useState('cajero');
+  const [role, setRole] = useState<User['role']>('cajero');
 
   // Modal link de activación
   const [linkInfo, setLinkInfo] = useState<{ name: string; link?: string } | null>(null);
@@ -163,7 +163,7 @@ export default function UsuariosScreen() {
             )}
             <View style={styles.chipsRow}>
               {Object.entries(ROLES).map(([key, r]) => (
-                <TouchableOpacity key={key} onPress={() => setRole(key)} style={[styles.chip, role === key && { backgroundColor: r.color, borderColor: r.color }]}>
+                <TouchableOpacity key={key} onPress={() => setRole(key as User['role'])} style={[styles.chip, role === key && { backgroundColor: r.color, borderColor: r.color }]}>
                   <Text style={[styles.chipText, role === key && styles.chipTextActive]}>{r.label}</Text>
                 </TouchableOpacity>
               ))}

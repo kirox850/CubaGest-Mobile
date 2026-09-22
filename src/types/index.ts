@@ -62,7 +62,9 @@ export interface Sale {
   subtotal: number;
   tax?: number;
   total: number;
-  currency: 'CUP' | 'MLC';
+  // Multimoneda: el backend acepta cualquier moneda habilitada en settings
+  // (CUP, USD, MLC, EUR, ZELLE, CLASICA...), así que es string libre.
+  currency: string;
   payMethod: string;
   status: 'emitida' | 'anulada';
   userId?: string;

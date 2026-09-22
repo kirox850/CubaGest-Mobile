@@ -124,6 +124,7 @@ export async function apiFetch<T = unknown>(
     // ponen como hermanos de "ok" (ej: { ok, accessToken, refreshToken,
     // user }). Desenvolvemos en ambos casos para que cada pantalla reciba
     // directamente lo que espera, en vez del sobre completo.
+    if (!raw) throw new Error('Respuesta inválida del servidor');
     if ('data' in raw) return raw.data as T;
     const { ok: _ok, ...rest } = raw;
     return rest as T;

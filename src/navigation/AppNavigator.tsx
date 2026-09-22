@@ -9,6 +9,7 @@ import { useTheme } from '../context/ThemeContext';
 import { ROLES } from '../config/roles';
 import { colors, shadow, themeRef } from '../config/theme';
 import { PRIVACY_POLICY_MD, TERMS_MD } from '../config/legalContent';
+import type { User } from '../types';
 import PlanModal from '../components/PlanModal';
 import LegalModal from '../components/LegalModal';
 import WelcomeTour from '../components/WelcomeTour';
