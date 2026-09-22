@@ -5,8 +5,9 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { useAuth } from '../context/AuthContext';
 import { useSync } from '../context/SyncContext';
+import { useTheme } from '../context/ThemeContext';
 import { ROLES } from '../config/roles';
-import { colors, shadow } from '../config/theme';
+import { colors, shadow, themeRef } from '../config/theme';
 import { PRIVACY_POLICY_MD, TERMS_MD } from '../config/legalContent';
 import PlanModal from '../components/PlanModal';
 import LegalModal from '../components/LegalModal';
@@ -22,6 +23,7 @@ import CierreCajaScreen from '../screens/CierreCajaScreen';
 import TransferenciasScreen from '../screens/TransferenciasScreen';
 import AuditoriaScreen from '../screens/AuditoriaScreen';
 import MonedasScreen from '../screens/MonedasScreen';
+import DiscountsScreen from '../screens/DiscountsScreen';
 
 const Tab = createBottomTabNavigator();
 
@@ -56,10 +58,12 @@ const ALL_TABS: TabDef[] = [
   { key: 'auditoria', label: 'Auditoría', component: AuditoriaScreen },
   { key: 'monedas', label: 'Monedas', component: MonedasScreen },
   { key: 'usuarios', label: 'Usuarios', component: UsuariosScreen },
+  { key: 'descuentos', label: 'Descuentos', component: DiscountsScreen },
 ];
 
 function HeaderRight({ onOpenPlan, onOpenLegal, onOpenTour }: { onOpenPlan: () => void; onOpenLegal: (doc: 'privacy' | 'terms') => void; onOpenTour: () => void }) {
   const { user, logout, online } = useAuth();
+  const { mode, toggle: toggleTheme } = useTheme();
   const { pendingCount, conflictCount, syncing, syncNow } = useSync();
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -120,6 +124,9 @@ function HeaderRight({ onOpenPlan, onOpenLegal, onOpenTour }: { onOpenPlan: () =
             <TouchableOpacity style={styles.menuItem} onPress={() => { setMenuOpen(false); onOpenTour(); }}>
               <Text style={styles.menuItemText}>👋  Ver tour de bienvenida</Text>
             </TouchableOpacity>
+            <TouchableOpacity style={styles.menuItem} onPress={() => { toggleTheme(); }}>
+              <Text style={styles.menuItemText}>{mode === 'dark' ? '☀️  Modo claro' : '🌙  Modo oscuro'}</Text>
+            </TouchableOpacity>
 
             <View style={styles.menuDivider} />
 
@@ -174,8 +181,12 @@ function TrialBanner({ info, onPress }: { info: TrialBannerInfo; onPress: () => 
 
 export default function AppNavigator() {
   const { user, logout } = useAuth();
+  const { mode, version } = useTheme();
   const perms = ROLES[user?.role || '']?.perms || [];
-  const tabs = ALL_TABS.filter(t => perms.includes(t.key));
+  // Descuentos: igual que la web, se gating por ROL admin (el backend no
+  // define un permiso "descuentos" — no inventamos permisos nuevos aquí).
+  const tabs = ALL_TABS.filter(t => perms.includes(t.key) || (t.key === 'descuentos' && user?.role === 'admin'));
+  const isDark = mode === 'dark';
 
   // Blindaje: si el rol del usuario no produce ninguna pestaña (rol nuevo,
   // usuario cacheado antiguo, etc.), mostramos un aviso en vez de dejar que
@@ -210,7 +221,20 @@ export default function AppNavigator() {
         </SafeAreaView>
       )}
 
-      <NavigationContainer>
+      {/* key={version}: al cambiar el tema re-monta el navigator con los
+          estilos nuevos (los factories ya están vivos vía Proxy, esto cubre
+          los valores que react-navigation cachea internamente). */}
+      <NavigationContainer key={version} theme={{
+        dark: isDark,
+        colors: {
+          primary: colors.primary,
+          background: colors.bg,
+          card: colors.bgCard,
+          text: colors.text,
+          border: colors.border,
+          notification: colors.danger,
+        },
+      } as any}>
         <Tab.Navigator
           screenOptions={({ route }) => {
             const tabKey = ALL_TABS.find(t => t.label === route.name)?.key;
@@ -223,7 +247,7 @@ export default function AppNavigator() {
                 />
               ),
               headerStyle: {
-                backgroundColor: '#ffffff',
+                backgroundColor: colors.bgCard,
                 ...shadow.sm,
               },
               headerTitleStyle: {
@@ -236,7 +260,7 @@ export default function AppNavigator() {
               tabBarInactiveTintColor: colors.textMuted,
               tabBarLabelStyle: { fontSize: 10, fontWeight: '700', marginBottom: 2 },
               tabBarStyle: {
-                backgroundColor: '#ffffff',
+                backgroundColor: colors.bgCard,
                 borderTopColor: colors.border,
                 borderTopWidth: 1,
                 height: 60,
@@ -275,7 +299,7 @@ export default function AppNavigator() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = () => StyleSheet.create({
   headerRight: { flexDirection: 'row', alignItems: 'center', gap: 8, marginRight: 14 },
   offlinePill: {
     backgroundColor: colors.warning + '20',
@@ -284,16 +308,16 @@ const styles = StyleSheet.create({
   },
   offlinePillText: { color: colors.warning, fontSize: 10, fontWeight: '700' },
   syncPill: {
-    backgroundColor: '#EFF6FF',
+    backgroundColor: colors.primaryTint,
     borderRadius: 20,
     paddingHorizontal: 8, paddingVertical: 3,
-    borderWidth: 1, borderColor: '#BFDBFE',
+    borderWidth: 1, borderColor: colors.primaryTintB,
   },
   syncPillConflict: {
-    backgroundColor: '#FFF7ED',
-    borderColor: '#FED7AA',
+    backgroundColor: colors.warningBg,
+    borderColor: colors.warningBorder,
   },
-  syncPillText: { color: '#1D4ED8', fontSize: 10, fontWeight: '700' },
+  syncPillText: { color: colors.primary, fontSize: 10, fontWeight: '700' },
 
   avatarBtn: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
   avatarText: { color: '#fff', fontWeight: '800', fontSize: 13 },
@@ -301,7 +325,7 @@ const styles = StyleSheet.create({
   menuOverlay: { flex: 1, backgroundColor: 'rgba(15,23,42,0.35)' },
   menuCard: {
     position: 'absolute', top: 56, right: 12, minWidth: 230,
-    backgroundColor: '#fff', borderRadius: 12, borderWidth: 1, borderColor: colors.border,
+    backgroundColor: colors.bgCard, borderRadius: 12, borderWidth: 1, borderColor: colors.border,
     paddingVertical: 6, ...shadow.md,
   },
   menuHeader: { paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: colors.borderLight },
@@ -319,9 +343,23 @@ const styles = StyleSheet.create({
   tabIcon: { alignItems: 'center', justifyContent: 'center', width: 32, height: 28, borderRadius: 8 },
   tabIconActive: { backgroundColor: colors.primary + '15' },
 
-  noTabsWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, backgroundColor: '#F8FAFC' },
-  noTabsTitle: { fontSize: 18, fontWeight: '800', color: '#1E293B', marginBottom: 8 },
+  noTabsWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, backgroundColor: colors.bg },
+  noTabsTitle: { fontSize: 18, fontWeight: '800', color: colors.text, marginBottom: 8 },
   noTabsText: { fontSize: 13, color: colors.textMuted, textAlign: 'center', lineHeight: 20, marginBottom: 20 },
-  noTabsBtn: { backgroundColor: '#3B82F6', borderRadius: 10, paddingVertical: 10, paddingHorizontal: 22 },
+  noTabsBtn: { backgroundColor: colors.primary, borderRadius: 10, paddingVertical: 10, paddingHorizontal: 22 },
   noTabsBtnText: { color: '#fff', fontWeight: '700' },
 });
+
+// Estilos VIVOS: se reconstruyen cuando cambia el tema (dark mode).
+let __stylesVersion = -1;
+let __styles: ReturnType<typeof createStyles> | null = null;
+const styles = new Proxy({} as ReturnType<typeof createStyles>, {
+  get(_t, prop) {
+    if (__stylesVersion !== themeRef.version || !__styles) {
+      __styles = createStyles();
+      __stylesVersion = themeRef.version;
+    }
+    return __styles[prop as keyof ReturnType<typeof createStyles>];
+  },
+});
+

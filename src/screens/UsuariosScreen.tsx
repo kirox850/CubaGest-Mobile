@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, Modal, A
 import { useFocusEffect } from '@react-navigation/native';
 import { UsersAPI } from '../api/endpoints';
 import { ROLES } from '../config/roles';
-import { colors } from '../config/theme';
+import { colors, themeRef } from '../config/theme';
 import { Badge, EmptyState, ErrorBanner } from '../components/UI';
 import type { User } from '../types';
 
@@ -203,28 +203,42 @@ export default function UsuariosScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  wrap: { flex: 1, backgroundColor: '#F8FAFC', padding: 16 },
+const createStyles = () => StyleSheet.create({
+  wrap: { flex: 1, backgroundColor: colors.bg, padding: 16 },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
-  title: { fontSize: 22, fontWeight: '800', color: '#1E293B' },
-  addBtn: { backgroundColor: '#3B82F6', paddingVertical: 8, paddingHorizontal: 14, borderRadius: 8 },
+  title: { fontSize: 22, fontWeight: '800', color: colors.text },
+  addBtn: { backgroundColor: colors.primary, paddingVertical: 8, paddingHorizontal: 14, borderRadius: 8 },
   addBtnText: { color: '#fff', fontWeight: '700', fontSize: 13 },
-  row: { flexDirection: 'row', backgroundColor: '#fff', borderRadius: 14, borderWidth: 1, borderColor: '#E2E8F0', padding: 12, marginBottom: 8, alignItems: 'center' },
-  name: { fontWeight: '700', fontSize: 14, color: '#1E293B' },
+  row: { flexDirection: 'row', backgroundColor: colors.bgCard, borderRadius: 14, borderWidth: 1, borderColor: colors.border, padding: 12, marginBottom: 8, alignItems: 'center' },
+  name: { fontWeight: '700', fontSize: 14, color: colors.text },
   email: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
-  resendLink: { color: '#3B82F6', fontSize: 12, fontWeight: '600' },
-  deactivateLink: { color: '#EF4444', fontSize: 12, fontWeight: '600' },
+  resendLink: { color: colors.primary, fontSize: 12, fontWeight: '600' },
+  deactivateLink: { color: colors.danger, fontSize: 12, fontWeight: '600' },
   modalBg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 24 },
-  modalCard: { backgroundColor: '#fff', borderRadius: 14, padding: 20 },
-  modalTitle: { fontWeight: '700', fontSize: 16, marginBottom: 8, color: '#1E293B' },
+  modalCard: { backgroundColor: colors.bgCard, borderRadius: 14, padding: 20 },
+  modalTitle: { fontWeight: '700', fontSize: 16, marginBottom: 8, color: colors.text },
   hint: { fontSize: 12, color: colors.textMuted, marginBottom: 10 },
-  input: { borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 12, padding: 10, fontSize: 14, marginBottom: 10, color: '#1E293B', backgroundColor: '#F8FAFC' },
+  input: { borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 10, fontSize: 14, marginBottom: 10, color: colors.text, backgroundColor: colors.bg },
   chipsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 10 },
-  chip: { borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 20, paddingVertical: 6, paddingHorizontal: 12 },
-  chipText: { fontSize: 12, color: '#1E293B' },
+  chip: { borderWidth: 1, borderColor: colors.border, borderRadius: 20, paddingVertical: 6, paddingHorizontal: 12 },
+  chipText: { fontSize: 12, color: colors.text },
   chipTextActive: { color: '#fff' },
   modalActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 6 },
   cancelBtn: { paddingVertical: 10, paddingHorizontal: 16 },
-  saveBtn: { backgroundColor: '#3B82F6', paddingVertical: 10, paddingHorizontal: 18, borderRadius: 8 },
-  linkBox: { fontSize: 12, color: '#3B82F6', backgroundColor: '#EFF6FF', borderRadius: 8, padding: 10, marginBottom: 8 },
+  saveBtn: { backgroundColor: colors.primary, paddingVertical: 10, paddingHorizontal: 18, borderRadius: 8 },
+  linkBox: { fontSize: 12, color: colors.primary, backgroundColor: colors.primaryTint, borderRadius: 8, padding: 10, marginBottom: 8 },
 });
+
+// Estilos VIVOS: se reconstruyen cuando cambia el tema (dark mode).
+let __stylesVersion = -1;
+let __styles: ReturnType<typeof createStyles> | null = null;
+export const styles = new Proxy({} as ReturnType<typeof createStyles>, {
+  get(_t, prop) {
+    if (__stylesVersion !== themeRef.version || !__styles) {
+      __styles = createStyles();
+      __stylesVersion = themeRef.version;
+    }
+    return __styles[prop as keyof ReturnType<typeof createStyles>];
+  },
+});
+

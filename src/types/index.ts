@@ -273,4 +273,6 @@ export interface ApiFetchOptions {
   method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
   body?: Record<string, unknown>;
   auth?: boolean;
+  /** Uso interno del cliente: evita bucles infinitos al reintentar tras refresh */
+  __isRetry?: boolean;
 }

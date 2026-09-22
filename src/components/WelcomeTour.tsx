@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, Modal, TouchableOpacity, StyleSheet, Pressable } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { colors, themeRef } from '../config/theme';
 
 const TOUR_KEY = 'cubagest_tour_done';
 
@@ -61,16 +62,30 @@ export default function WelcomeTour({ forceOpen, onClose }: { forceOpen?: boolea
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = () => StyleSheet.create({
   overlay: { flex: 1, backgroundColor: 'rgba(15,23,42,0.6)', alignItems: 'center', justifyContent: 'flex-end', padding: 20 },
-  card: { backgroundColor: '#fff', borderRadius: 18, padding: 22, width: '100%', maxWidth: 420 },
+  card: { backgroundColor: colors.bgCard, borderRadius: 18, padding: 22, width: '100%', maxWidth: 420 },
   emoji: { fontSize: 34, marginBottom: 8 },
-  title: { fontSize: 17, fontWeight: '800', color: '#1E293B', marginBottom: 6 },
-  text: { fontSize: 13.5, color: '#475569', lineHeight: 21, marginBottom: 12 },
-  counter: { fontSize: 11, fontWeight: '700', color: '#94A3B8', marginBottom: 12 },
+  title: { fontSize: 17, fontWeight: '800', color: colors.text, marginBottom: 6 },
+  text: { fontSize: 13.5, color: colors.textSecondary, lineHeight: 21, marginBottom: 12 },
+  counter: { fontSize: 11, fontWeight: '700', color: colors.textMuted, marginBottom: 12 },
   btnRow: { flexDirection: 'row', gap: 8 },
   skipBtn: { paddingVertical: 10, paddingHorizontal: 14, justifyContent: 'center' },
-  skipText: { color: '#64748B', fontWeight: '600', fontSize: 13 },
-  nextBtn: { flex: 1, backgroundColor: '#3B82F6', borderRadius: 12, paddingVertical: 11, alignItems: 'center' },
+  skipText: { color: colors.textMuted, fontWeight: '600', fontSize: 13 },
+  nextBtn: { flex: 1, backgroundColor: colors.primary, borderRadius: 12, paddingVertical: 11, alignItems: 'center' },
   nextText: { color: '#fff', fontWeight: '700', fontSize: 14 },
 });
+
+// Estilos VIVOS: se reconstruyen cuando cambia el tema (dark mode).
+let __stylesVersion = -1;
+let __styles: ReturnType<typeof createStyles> | null = null;
+export const styles = new Proxy({} as ReturnType<typeof createStyles>, {
+  get(_t, prop) {
+    if (__stylesVersion !== themeRef.version || !__styles) {
+      __styles = createStyles();
+      __stylesVersion = themeRef.version;
+    }
+    return __styles[prop as keyof ReturnType<typeof createStyles>];
+  },
+});
+

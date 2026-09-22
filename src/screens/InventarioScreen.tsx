@@ -7,7 +7,7 @@ import {
 import { useFocusEffect } from '@react-navigation/native';
 import { ProductsAPI, LocationsAPI } from '../api/endpoints';
 import { useAuth } from '../context/AuthContext';
-import { colors } from '../config/theme';
+import { colors, themeRef } from '../config/theme';
 import { CAN_MANAGE_INVENTORY } from '../config/roles';
 import { Badge, EmptyState, ErrorBanner } from '../components/UI';
 import { shareCSV } from '../utils/csv';
@@ -228,14 +228,14 @@ export default function InventarioScreen() {
         <Text style={styles.title}>Inventario</Text>
         <View style={{ flexDirection: 'row', gap: 8 }}>
           <TouchableOpacity
-            style={[styles.addBtn, { backgroundColor: '#F1F5F9' }]}
+            style={[styles.addBtn, { backgroundColor: colors.bgSecondary }]}
             onPress={() => shareCSV('inventario', products as any, [
               { key: 'code', label: 'Código' }, { key: 'name', label: 'Producto' }, { key: 'category', label: 'Categoría' },
               { key: 'unit', label: 'Unidad' }, { key: 'price', label: 'Precio' }, { key: 'currency', label: 'Moneda' },
               { key: 'stock', label: 'Stock' }, { key: 'minStock', label: 'Mínimo' },
             ])}
           >
-            <Text style={[styles.addBtnText, { color: '#475569' }]}>CSV</Text>
+            <Text style={[styles.addBtnText, { color: colors.textSecondary }]}>CSV</Text>
           </TouchableOpacity>
           {canManage && (
             <TouchableOpacity style={styles.addBtn} onPress={openCreate}>
@@ -481,17 +481,17 @@ export default function InventarioScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  wrap: { flex: 1, backgroundColor: '#F8FAFC', padding: 16 },
+const createStyles = () => StyleSheet.create({
+  wrap: { flex: 1, backgroundColor: colors.bg, padding: 16 },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: 10,
   },
-  title: { fontSize: 22, fontWeight: '800', color: '#1E293B' },
+  title: { fontSize: 22, fontWeight: '800', color: colors.text },
   addBtn: {
-    backgroundColor: '#3B82F6',
+    backgroundColor: colors.primary,
     borderRadius: 12,
     paddingVertical: 7,
     paddingHorizontal: 14,
@@ -500,40 +500,40 @@ const styles = StyleSheet.create({
   locRow: { flexDirection: 'row', gap: 8 },
   locChip: {
     borderWidth: 1,
-    borderColor: '#E2E8F0',
+    borderColor: colors.border,
     borderRadius: 20,
     paddingHorizontal: 14,
     paddingVertical: 7,
-    backgroundColor: '#fff',
+    backgroundColor: colors.bgCard,
   },
-  locChipActive: { backgroundColor: '#3B82F6', borderColor: '#3B82F6' },
-  locChipText: { fontSize: 12, fontWeight: '700', color: '#1E293B' },
+  locChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  locChipText: { fontSize: 12, fontWeight: '700', color: colors.text },
   locLabel: { fontSize: 12, color: colors.textMuted, marginBottom: 8, fontWeight: '600' },
   search: {
     borderWidth: 1,
-    borderColor: '#E2E8F0',
+    borderColor: colors.border,
     borderRadius: 12,
     paddingHorizontal: 12,
     paddingVertical: 9,
-    backgroundColor: '#fff',
+    backgroundColor: colors.bgCard,
     marginBottom: 12,
-    color: '#1E293B',
+    color: colors.text,
   },
   row: {
     flexDirection: 'row',
-    backgroundColor: '#fff',
+    backgroundColor: colors.bgCard,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#E2E8F0',
+    borderColor: colors.border,
     padding: 12,
     marginBottom: 8,
     alignItems: 'center',
   },
-  name: { fontWeight: '700', fontSize: 14, color: '#1E293B' },
+  name: { fontWeight: '700', fontSize: 14, color: colors.text },
   code: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
-  hint: { fontSize: 10, color: '#94A3B8', marginTop: 2 },
-  price: { fontWeight: '700', color: '#1E293B', marginBottom: 4 },
-  deleteLink: { fontSize: 11, color: '#EF4444', marginTop: 6 },
+  hint: { fontSize: 10, color: colors.textMuted, marginTop: 2 },
+  price: { fontWeight: '700', color: colors.text, marginBottom: 4 },
+  deleteLink: { fontSize: 11, color: colors.danger, marginTop: 6 },
 
   modalBg: {
     flex: 1,
@@ -542,7 +542,7 @@ const styles = StyleSheet.create({
     padding: 24,
   },
   modalCard: {
-    backgroundColor: '#fff',
+    backgroundColor: colors.bgCard,
     borderRadius: 14,
     padding: 20,
   },
@@ -550,32 +550,32 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     fontSize: 16,
     marginBottom: 8,
-    color: '#1E293B',
+    color: colors.text,
   },
-  modalSub: { fontSize: 12, color: '#3B82F6', fontWeight: '600', marginBottom: 12 },
+  modalSub: { fontSize: 12, color: colors.primary, fontWeight: '600', marginBottom: 12 },
   typeRow: { flexDirection: 'row', gap: 8, marginBottom: 14 },
   typeBtn: {
     flex: 1,
     borderWidth: 1,
-    borderColor: '#E2E8F0',
+    borderColor: colors.border,
     borderRadius: 12,
     paddingVertical: 10,
     alignItems: 'center',
   },
   typeBtnActive: {
-    backgroundColor: '#3B82F6',
-    borderColor: '#3B82F6',
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
   },
-  typeBtnText: { color: '#1E293B', fontWeight: '600' },
+  typeBtnText: { color: colors.text, fontWeight: '600' },
   typeBtnTextActive: { color: '#fff' },
   qtyInput: {
     borderWidth: 1,
-    borderColor: '#E2E8F0',
+    borderColor: colors.border,
     borderRadius: 12,
     padding: 10,
     fontSize: 16,
     marginBottom: 16,
-    color: '#1E293B',
+    color: colors.text,
   },
   modalActions: {
     flexDirection: 'row',
@@ -584,7 +584,7 @@ const styles = StyleSheet.create({
   },
   cancelBtn: { paddingVertical: 10, paddingHorizontal: 16 },
   saveBtn: {
-    backgroundColor: '#3B82F6',
+    backgroundColor: colors.primary,
     paddingVertical: 10,
     paddingHorizontal: 18,
     borderRadius: 12,
@@ -599,12 +599,26 @@ const styles = StyleSheet.create({
   },
   fieldInput: {
     borderWidth: 1,
-    borderColor: '#E2E8F0',
+    borderColor: colors.border,
     borderRadius: 12,
     paddingHorizontal: 10,
     paddingVertical: 8,
     fontSize: 14,
-    color: '#1E293B',
-    backgroundColor: '#F8FAFC',
+    color: colors.text,
+    backgroundColor: colors.bg,
   },
 });
+
+// Estilos VIVOS: se reconstruyen cuando cambia el tema (dark mode).
+let __stylesVersion = -1;
+let __styles: ReturnType<typeof createStyles> | null = null;
+export const styles = new Proxy({} as ReturnType<typeof createStyles>, {
+  get(_t, prop) {
+    if (__stylesVersion !== themeRef.version || !__styles) {
+      __styles = createStyles();
+      __stylesVersion = themeRef.version;
+    }
+    return __styles[prop as keyof ReturnType<typeof createStyles>];
+  },
+});
+

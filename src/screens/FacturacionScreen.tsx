@@ -7,8 +7,8 @@ import { useFocusEffect } from '@react-navigation/native';
 import { SalesAPI } from '../api/endpoints';
 import { useAuth } from '../context/AuthContext';
 import { useSync } from '../context/SyncContext';
-import { colors } from '../config/theme';
-import { PAY_METHODS } from '../config/roles';
+import { colors, themeRef } from '../config/theme';
+import { PAY_METHODS, CURRENCY_SYMBOLS } from '../config/roles';
 import { EmptyState, ErrorBanner, Badge } from '../components/UI';
 import { shareCSV } from '../utils/csv';
 import type { Sale } from '../types';
@@ -167,7 +167,7 @@ export default function FacturacionScreen() {
               <Text style={styles.date}>{(s.date || s.createdAt || '').split('T')[0]}</Text>
             </View>
             <View style={{ alignItems: 'flex-end', gap: 4 }}>
-              <Text style={styles.amount}>${fmt(Number(s.total))}</Text>
+              <Text style={styles.amount}>{CURRENCY_SYMBOLS[s.currency] || '$'}{fmt(Number(s.total))}</Text>
               <Badge
                 label={s.status === 'emitida' ? 'Emitida' : 'Anulada'}
                 color={s.status === 'emitida' ? '#10B981' : '#EF4444'}
@@ -185,26 +185,28 @@ export default function FacturacionScreen() {
               <Text style={styles.modalTitle}>Factura {viewInv.invoiceNumber || viewInv.id}</Text>
               <ScrollView>
                 <View style={styles.receipt}>
-                  <Text style={styles.receiptCenter}>CUBAGEST</Text>
-                  <Text style={styles.receiptCenter}>FACTURA COMERCIAL</Text>
-                  {viewInv.status === 'anulada' && <Text style={[styles.receiptCenter, { color: '#EF4444', fontWeight: '800' }]}>⚠ ANULADA</Text>}
+                  <Text style={styles.receiptCenter}>{user?.company?.name || 'Mi Negocio'}</Text>
+                  <Text style={styles.receiptCenter}>FACTURA</Text>
+                  <Text style={styles.receiptLine}>No. {viewInv.invoiceNumber || viewInv.id}</Text>
+                  {viewInv.status === 'anulada' && <Text style={[styles.receiptCenter, { color: colors.danger, fontWeight: '800' }]}>⚠ ANULADA</Text>}
                   <Text style={styles.receiptLine}>Fecha: {(viewInv.date || viewInv.createdAt || '').split('T')[0]}</Text>
                   <Text style={styles.receiptLine}>Cliente: {viewInv.clientName || viewInv.client}</Text>
-                  {viewInv.clientNit && <Text style={styles.receiptLine}>NIT: {viewInv.clientNit}</Text>}
+                  {viewInv.clientNit && viewInv.clientNit !== '00000000000' && <Text style={styles.receiptLine}>Carnet: {viewInv.clientNit}</Text>}
                   {viewInv.clientPhone && <Text style={styles.receiptLine}>Tel: {viewInv.clientPhone}</Text>}
                   <Text style={styles.receiptLine}>Metodo: {PAY_METHODS.find(p => p.id === viewInv.payMethod)?.label || viewInv.payMethod}</Text>
                   <Text style={styles.receiptDivider}>─────────────────────</Text>
-                  {(viewInv.items || viewInv.SaleItems || []).map((item, i) => (
+                  {(viewInv.items || (viewInv as any).SaleItems || []).map((item: any, i: number) => (
                     <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                       <Text style={styles.receiptLine}>{item.qty}x {item.name}</Text>
-                      <Text style={styles.receiptLine}>${fmt(Number(item.total) || item.price * item.qty)}</Text>
+                      <Text style={styles.receiptLine}>{CURRENCY_SYMBOLS[viewInv.currency] || '$'}{fmt(Number(item.total) || item.price * item.qty)}</Text>
                     </View>
                   ))}
                   <Text style={styles.receiptDivider}>─────────────────────</Text>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                     <Text style={[styles.receiptLine, { fontWeight: '800' }]}>TOTAL:</Text>
-                    <Text style={[styles.receiptLine, { fontWeight: '800' }]}>${fmt(Number(viewInv.total))} CUP</Text>
+                    <Text style={[styles.receiptLine, { fontWeight: '800' }]}>{CURRENCY_SYMBOLS[viewInv.currency] || '$'}{fmt(Number(viewInv.total))} {viewInv.currency || 'CUP'}</Text>
                   </View>
+                  <Text style={[styles.receiptCenter, { fontSize: 8, color: colors.textMuted, marginTop: 6 }]}>Hecho con CubaGest</Text>
                 </View>
               </ScrollView>
 
@@ -215,12 +217,12 @@ export default function FacturacionScreen() {
                       <Text style={{ color: '#fff', fontWeight: '700' }}>Anular</Text>
                     </TouchableOpacity>
                     <TouchableOpacity style={styles.btnSecondary} onPress={() => openEdit(viewInv)}>
-                      <Text style={{ color: '#1E293B', fontWeight: '600' }}>Editar datos</Text>
+                      <Text style={{ color: colors.text, fontWeight: '600' }}>Editar datos</Text>
                     </TouchableOpacity>
                   </>
                 )}
                 <TouchableOpacity style={styles.btnSecondary} onPress={() => setViewInv(null)}>
-                  <Text style={{ color: '#1E293B', fontWeight: '600' }}>Cerrar</Text>
+                  <Text style={{ color: colors.text, fontWeight: '600' }}>Cerrar</Text>
                 </TouchableOpacity>
               </View>
             </View>
@@ -236,7 +238,7 @@ export default function FacturacionScreen() {
               <Text style={styles.modalTitle}>Editar datos de factura</Text>
               <Text style={styles.note}>Solo se pueden editar datos del cliente y metodo de pago.</Text>
               <TextInput style={styles.input} value={editForm.clientName} onChangeText={v => setEditForm(f => ({ ...f, clientName: v }))} placeholder="Nombre del cliente" placeholderTextColor={colors.textMuted} />
-              <TextInput style={styles.input} value={editForm.clientNit} onChangeText={v => setEditForm(f => ({ ...f, clientNit: v }))} placeholder="NIT" keyboardType="numeric" maxLength={11} placeholderTextColor={colors.textMuted} />
+              <TextInput style={styles.input} value={editForm.clientNit} onChangeText={v => setEditForm(f => ({ ...f, clientNit: v }))} placeholder="Carnet" keyboardType="numeric" maxLength={11} placeholderTextColor={colors.textMuted} />
               <TextInput style={styles.input} value={editForm.clientPhone} onChangeText={v => setEditForm(f => ({ ...f, clientPhone: v }))} placeholder="Telefono" keyboardType="phone-pad" placeholderTextColor={colors.textMuted} />
               <View style={styles.payRow}>
                 {PAY_METHODS.map(m => (
@@ -261,39 +263,53 @@ export default function FacturacionScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  wrap: { flex: 1, backgroundColor: '#F8FAFC', padding: 12 },
-  csvBtn: { backgroundColor: '#EFF6FF', borderWidth: 1, borderColor: '#BFDBFE', borderRadius: 10, paddingVertical: 9, alignItems: 'center', marginBottom: 10 },
+const createStyles = () => StyleSheet.create({
+  wrap: { flex: 1, backgroundColor: colors.bg, padding: 12 },
+  csvBtn: { backgroundColor: colors.primaryTint, borderWidth: 1, borderColor: colors.primaryTintB, borderRadius: 10, paddingVertical: 9, alignItems: 'center', marginBottom: 10 },
   csvBtnText: { color: '#1D4ED8', fontWeight: '700', fontSize: 13 },
-  offlineBox: { backgroundColor: '#EFF6FF', borderRadius: 12, borderWidth: 1, borderColor: '#BFDBFE', padding: 10, marginBottom: 10 },
+  offlineBox: { backgroundColor: colors.primaryTint, borderRadius: 12, borderWidth: 1, borderColor: colors.primaryTintB, padding: 10, marginBottom: 10 },
   offlineRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 3 },
   offlineId: { fontSize: 12, fontWeight: '700', color: '#1D4ED8', fontFamily: 'monospace' },
   offlineConflict: { fontSize: 11, fontWeight: '600', color: '#C2410C', flex: 1, marginRight: 8 },
-  offlineAmt: { fontSize: 12, fontWeight: '700', color: '#1E293B' },
+  offlineAmt: { fontSize: 12, fontWeight: '700', color: colors.text },
   syncMsg: { fontSize: 12, fontWeight: '600', color: '#1E40AF', marginBottom: 6 },
   syncBtn: { backgroundColor: '#1D4ED8', borderRadius: 8, paddingVertical: 8, alignItems: 'center', marginTop: 6 },
   syncBtnText: { color: '#fff', fontWeight: '700', fontSize: 12 },
-  search: { borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 9, backgroundColor: '#fff', marginBottom: 12, fontSize: 14, color: '#1E293B' },
-  row: { flexDirection: 'row', backgroundColor: '#fff', borderRadius: 14, borderWidth: 1, borderColor: '#E2E8F0', padding: 12, marginBottom: 8 },
-  invoice: { fontWeight: '700', fontSize: 13, color: '#3B82F6', fontFamily: 'monospace' },
-  client: { fontSize: 13, color: '#1E293B', marginTop: 2 },
+  search: { borderWidth: 1, borderColor: colors.border, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 9, backgroundColor: colors.bgCard, marginBottom: 12, fontSize: 14, color: colors.text },
+  row: { flexDirection: 'row', backgroundColor: colors.bgCard, borderRadius: 14, borderWidth: 1, borderColor: colors.border, padding: 12, marginBottom: 8 },
+  invoice: { fontWeight: '700', fontSize: 13, color: colors.primary, fontFamily: 'monospace' },
+  client: { fontSize: 13, color: colors.text, marginTop: 2 },
   date: { fontSize: 11, color: colors.textMuted },
-  amount: { fontWeight: '800', fontSize: 15, color: '#1E293B' },
+  amount: { fontWeight: '800', fontSize: 15, color: colors.text },
   modalBg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  modalCard: { backgroundColor: '#fff', borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 20, maxHeight: '85%' },
-  modalTitle: { fontWeight: '800', fontSize: 16, marginBottom: 14, color: '#1E293B' },
-  receipt: { backgroundColor: '#F8FAFC', borderRadius: 12, padding: 14, marginBottom: 16 },
-  receiptCenter: { textAlign: 'center', fontWeight: '700', fontSize: 13, color: '#1E293B', marginBottom: 2, fontFamily: 'monospace' },
-  receiptLine: { fontSize: 12, color: '#1E293B', fontFamily: 'monospace', marginBottom: 2 },
+  modalCard: { backgroundColor: colors.bgCard, borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 20, maxHeight: '85%' },
+  modalTitle: { fontWeight: '800', fontSize: 16, marginBottom: 14, color: colors.text },
+  receipt: { backgroundColor: colors.bg, borderRadius: 12, padding: 14, marginBottom: 16 },
+  receiptCenter: { textAlign: 'center', fontWeight: '700', fontSize: 13, color: colors.text, marginBottom: 2, fontFamily: 'monospace' },
+  receiptLine: { fontSize: 12, color: colors.text, fontFamily: 'monospace', marginBottom: 2 },
   receiptDivider: { fontSize: 11, color: colors.textMuted, fontFamily: 'monospace', marginVertical: 4 },
   modalActions: { flexDirection: 'row', gap: 8, justifyContent: 'flex-end', marginTop: 8 },
-  btnPrimary: { backgroundColor: '#3B82F6', paddingVertical: 10, paddingHorizontal: 18, borderRadius: 8 },
-  btnSecondary: { backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#E2E8F0', paddingVertical: 10, paddingHorizontal: 14, borderRadius: 8 },
-  btnDanger: { backgroundColor: '#EF4444', paddingVertical: 10, paddingHorizontal: 14, borderRadius: 8 },
+  btnPrimary: { backgroundColor: colors.primary, paddingVertical: 10, paddingHorizontal: 18, borderRadius: 8 },
+  btnSecondary: { backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.border, paddingVertical: 10, paddingHorizontal: 14, borderRadius: 8 },
+  btnDanger: { backgroundColor: colors.danger, paddingVertical: 10, paddingHorizontal: 14, borderRadius: 8 },
   note: { fontSize: 12, color: colors.warningTextDark, backgroundColor: colors.warningBg, borderRadius: 8, padding: 8, marginBottom: 12 },
-  input: { borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 12, paddingHorizontal: 10, paddingVertical: 8, fontSize: 13, backgroundColor: '#F8FAFC', marginBottom: 10, color: '#1E293B' },
+  input: { borderWidth: 1, borderColor: colors.border, borderRadius: 12, paddingHorizontal: 10, paddingVertical: 8, fontSize: 13, backgroundColor: colors.bg, marginBottom: 10, color: colors.text },
   payRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
-  payBtn: { flex: 1, borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 12, paddingVertical: 8, alignItems: 'center' },
-  payBtnActive: { backgroundColor: '#3B82F6', borderColor: '#3B82F6' },
-  payBtnText: { fontSize: 12, fontWeight: '600', color: '#1E293B' },
+  payBtn: { flex: 1, borderWidth: 1, borderColor: colors.border, borderRadius: 12, paddingVertical: 8, alignItems: 'center' },
+  payBtnActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  payBtnText: { fontSize: 12, fontWeight: '600', color: colors.text },
 });
+
+// Estilos VIVOS: se reconstruyen cuando cambia el tema (dark mode).
+let __stylesVersion = -1;
+let __styles: ReturnType<typeof createStyles> | null = null;
+export const styles = new Proxy({} as ReturnType<typeof createStyles>, {
+  get(_t, prop) {
+    if (__stylesVersion !== themeRef.version || !__styles) {
+      __styles = createStyles();
+      __stylesVersion = themeRef.version;
+    }
+    return __styles[prop as keyof ReturnType<typeof createStyles>];
+  },
+});
+

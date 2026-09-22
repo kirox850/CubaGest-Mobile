@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, ScrollView, RefreshControl } from 'react-native
 import { useFocusEffect } from '@react-navigation/native';
 import { DashboardAPI } from '../api/endpoints';
 import { useAuth } from '../context/AuthContext';
-import { colors } from '../config/theme';
+import { colors, themeRef } from '../config/theme';
 import { ROLES } from '../config/roles';
 import { ErrorBanner } from '../components/UI';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -19,6 +19,11 @@ export default function DashboardScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [cacheDate, setCacheDate] = useState<string | null>(null);
+  // Selectores del gráfico (paridad con la web): rango y moneda. En RN el
+  // equivalente del <select> nativo de la web son estos chips — táctiles,
+  // sin dropdowns que emular.
+  const [range, setRange] = useState<7 | 30 | 90 | 180>(7);
+  const [cur, setCur] = useState<string>('all');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -68,14 +73,34 @@ export default function DashboardScreen() {
     </View>
   );
 
-  // Gráfico de barras de los últimos 7 días (sin dependencias externas).
-  const chart = summary?.chartDays || [];
+  // Serie del gráfico: la API expone trend30ByCurrency (por moneda) y
+  // trend30 (suma solo para dibujar la curva — nunca se convierten).
+  const allSeries: { date: string; total: number }[] =
+    (analytics?.trend30ByCurrency && Object.keys(analytics.trend30ByCurrency).length > 0)
+      ? Object.entries(analytics.trend30ByCurrency as Record<string, any[]>).flatMap(([c, arr]) =>
+          (arr as any[]).map((d: any) => ({ date: d.date, total: Number(d.total) || 0, cur: c })))
+          .filter((d: any) => cur === 'all' || d.cur === cur)
+          .reduce((acc: { date: string; total: number }[], d: any) => {
+            const found = acc.find((x) => x.date === d.date);
+            if (found) found.total += d.total; // suma SOLO para dibujar, igual que web
+            else acc.push({ date: d.date, total: d.total });
+            return acc;
+          }, [])
+      : (summary?.chartDays || []).map((d) => ({ date: d.date, total: Number(d.total) || 0 }));
+  // Rango seleccionado → últimos N días (el backend devuelve hasta 30; si el
+  // rango pedido excede los datos disponibles, se muestran los que haya).
+  const chart = allSeries
+    .slice()
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .slice(-range);
   const maxTotal = Math.max(1, ...chart.map((d) => d.total));
+  const currencies: string[] = analytics?.trend30ByCurrency ? Object.keys(analytics.trend30ByCurrency) : [];
+  const rangeLabel = range === 7 ? '7 días' : range === 30 ? '30 días' : range === 90 ? '3 meses' : '6 meses';
 
   return (
     <ScrollView
       style={styles.wrap}
-      refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={'#3B82F6'} />}
+      refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={colors.primary} />}
     >
       <ErrorBanner message={error} />
       {cacheDate && (
@@ -127,10 +152,30 @@ export default function DashboardScreen() {
             <Text style={styles.todayCount}>{summary.todaySalesCount || 0} factura{(summary.todaySalesCount || 0) === 1 ? '' : 's'}</Text>
           </View>
 
-          {/* Gráfico últimos 7 días */}
+          {/* Gráfico con rango y moneda seleccionables (como la web) */}
           {chart.length > 0 && (
             <View style={styles.chartBox}>
-              <Text style={styles.chartTitle}>Ventas últimos 7 días</Text>
+              <Text style={styles.chartTitle}>Ingresos por día · {rangeLabel}</Text>
+              {/* Selector de rango — chips nativos (equiv. del select web) */}
+              <View style={styles.chartSeg}>
+                {([[7, '7d'], [30, '30d'], [90, '3m'], [180, '6m']] as const).map(([v, l]) => (
+                  <TouchableOpacity key={l} style={[styles.chartSegBtn, range === v && styles.chartSegBtnOn]} onPress={() => setRange(v as 7 | 30 | 90 | 180)}>
+                    <Text style={[styles.chartSegText, range === v && styles.chartSegTextOn]}>{l}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              {/* Selector de moneda — solo si hay más de una */}
+              {currencies.length > 1 && (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8 }}>
+                  <View style={styles.chartSeg}>
+                    {['all', ...currencies].map((c) => (
+                      <TouchableOpacity key={c} style={[styles.chartSegBtn, cur === c && styles.chartSegBtnOn]} onPress={() => setCur(c)}>
+                        <Text style={[styles.chartSegText, cur === c && styles.chartSegTextOn]}>{c === 'all' ? 'Todas' : c}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </ScrollView>
+              )}
               <View style={styles.chartRow}>
                 {chart.map((d) => (
                   <View key={d.date} style={styles.chartCol}>
@@ -199,7 +244,7 @@ export default function DashboardScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = () => StyleSheet.create({
   wrap: { flex: 1, backgroundColor: colors.bg },
   offlineBanner: { backgroundColor: '#F97316', padding: 8, alignItems: 'center' },
   offlineText: { color: '#fff', fontSize: 12, fontWeight: '600' },
@@ -207,7 +252,7 @@ const styles = StyleSheet.create({
   welcome: { fontSize: 20, fontWeight: '800', color: colors.text },
   role: { fontSize: 13, color: colors.textMuted, marginTop: 2 },
   grid: { flexDirection: 'row', gap: 12, paddingHorizontal: 12, marginBottom: 12 },
-  card: { flex: 1, backgroundColor: '#fff', borderRadius: 12, borderWidth: 1, borderColor: colors.border, padding: 14, position: 'relative' },
+  card: { flex: 1, backgroundColor: colors.bgCard, borderRadius: 12, borderWidth: 1, borderColor: colors.border, padding: 14, position: 'relative' },
   cardLabel: { fontSize: 11, fontWeight: '600', color: colors.textMuted, textTransform: 'uppercase', letterSpacing: 0.5 },
   cardValue: { fontSize: 18, fontWeight: '800', marginTop: 6, marginBottom: 4 },
   cardSub: { fontSize: 11, color: colors.textMuted },
@@ -218,41 +263,49 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginHorizontal: 12,
     marginBottom: 12,
-    backgroundColor: '#EFF6FF',
+    backgroundColor: colors.primaryTint,
     borderWidth: 1,
-    borderColor: '#BFDBFE',
+    borderColor: colors.primaryTintB,
     borderRadius: 12,
     padding: 14,
   },
-  todayLabel: { fontSize: 10, fontWeight: '800', color: '#3B82F6', letterSpacing: 1 },
+  todayLabel: { fontSize: 10, fontWeight: '800', color: colors.primary, letterSpacing: 1 },
 
-  curBox: { marginHorizontal: 12, marginBottom: 10, backgroundColor: '#fff', borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 14 },
+  curBox: { marginHorizontal: 12, marginBottom: 10, backgroundColor: colors.bgCard, borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 14 },
   curTitle: { fontSize: 11, fontWeight: '800', color: colors.textMuted, letterSpacing: 1 },
-  curRevenue: { fontSize: 20, fontWeight: '800', color: '#10B981', marginTop: 2 },
-  curExpenses: { fontSize: 12, color: '#3B82F6', marginTop: 2 },
+  curRevenue: { fontSize: 20, fontWeight: '800', color: colors.success, marginTop: 2 },
+  curExpenses: { fontSize: 12, color: colors.primary, marginTop: 2 },
 
-  anBox: { marginHorizontal: 12, marginBottom: 10, backgroundColor: '#fff', borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 14 },
-  anTitle: { fontSize: 13, fontWeight: '800', color: '#1E293B', marginBottom: 6 },
+  anBox: { marginHorizontal: 12, marginBottom: 10, backgroundColor: colors.bgCard, borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 14 },
+  anTitle: { fontSize: 13, fontWeight: '800', color: colors.text, marginBottom: 6 },
   anRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 3 },
-  anCur: { fontSize: 13, color: '#1E293B', fontWeight: '600' },
+  anCur: { fontSize: 13, color: colors.text, fontWeight: '600' },
   anDelta: { fontSize: 12, fontWeight: '800' },
-  anItem: { fontSize: 12, color: '#475569', paddingVertical: 2 },
-  todayValue: { fontSize: 20, fontWeight: '800', color: '#1E293B', marginTop: 2 },
-  todayCount: { fontSize: 12, fontWeight: '700', color: '#3B82F6' },
+  anItem: { fontSize: 12, color: colors.textSecondary, paddingVertical: 2 },
+  todayValue: { fontSize: 20, fontWeight: '800', color: colors.text, marginTop: 2 },
+  todayCount: { fontSize: 12, fontWeight: '700', color: colors.primary },
 
   chartBox: {
     marginHorizontal: 12,
     marginBottom: 12,
-    backgroundColor: '#fff',
+    backgroundColor: colors.bgCard,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: colors.border,
     padding: 14,
   },
-  chartTitle: { fontSize: 13, fontWeight: '700', color: '#1E293B', marginBottom: 10 },
+  chartTitle: { fontSize: 13, fontWeight: '700', color: colors.text, marginBottom: 10 },
+  chartSeg: { flexDirection: 'row', gap: 6, marginBottom: 10 },
+  chartSegBtn: {
+    borderWidth: 1.5, borderColor: colors.border, borderRadius: 8,
+    paddingVertical: 5, paddingHorizontal: 12, backgroundColor: colors.bg,
+  },
+  chartSegBtnOn: { borderColor: colors.primary, backgroundColor: colors.primaryTint },
+  chartSegText: { fontSize: 12, fontWeight: '700', color: colors.textMuted },
+  chartSegTextOn: { color: colors.primary },
   chartRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 6 },
   chartCol: { flex: 1, alignItems: 'center', gap: 4 },
-  chartBar: { width: '70%', backgroundColor: '#3B82F6', borderRadius: 4, minHeight: 4 },
+  chartBar: { width: '70%', backgroundColor: colors.primary, borderRadius: 4, minHeight: 4 },
   chartBarLabel: { fontSize: 8, color: colors.textMuted },
   chartDay: { fontSize: 9, color: colors.textMuted, fontWeight: '600' },
 
@@ -260,3 +313,17 @@ const styles = StyleSheet.create({
   alertTitle: { fontWeight: '700', fontSize: 14, color: colors.warningTextDark, marginBottom: 8 },
   alertItem: { fontSize: 13, color: colors.warningTextDark, marginBottom: 4 },
 });
+
+// Estilos VIVOS: se reconstruyen cuando cambia el tema (dark mode).
+let __stylesVersion = -1;
+let __styles: ReturnType<typeof createStyles> | null = null;
+export const styles = new Proxy({} as ReturnType<typeof createStyles>, {
+  get(_t, prop) {
+    if (__stylesVersion !== themeRef.version || !__styles) {
+      __styles = createStyles();
+      __stylesVersion = themeRef.version;
+    }
+    return __styles[prop as keyof ReturnType<typeof createStyles>];
+  },
+});
+

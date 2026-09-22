@@ -18,7 +18,7 @@ export const AuthAPI = {
     const res = await apiFetch<any>('/auth/me');
     return (res?.user ?? res) as User;
   },
-  register: (data: { companyName: string; companyNit?: string; name: string; email: string; password: string }): Promise<AuthResponse> =>
+  register: (data: { companyName: string; companyNit?: string; name: string; email: string; password: string; referralCode?: string }): Promise<AuthResponse> =>
     apiFetch('/auth/register', { method: 'POST', body: data, auth: false }),
   forgotPassword: (email: string): Promise<{ message: string }> =>
     apiFetch('/auth/forgot-password', { method: 'POST', body: { email }, auth: false }),

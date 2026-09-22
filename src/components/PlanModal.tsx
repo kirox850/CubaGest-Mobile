@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, Modal, ScrollView, TouchableOpacity, Linking, Alert, ActivityIndicator } from 'react-native';
-import { colors, radius } from '../config/theme';
+import { colors, radius, themeRef } from '../config/theme';
 import { PlanAPI, SubscriptionAPI } from '../api/endpoints';
 import type { User, PlanInfo } from '../types';
 
@@ -96,7 +96,7 @@ export default function PlanModal({ visible, onClose, user }: PlanModalProps) {
 
           <ScrollView style={styles.body} contentContainerStyle={{ paddingBottom: 8 }}>
             {isTrial && daysLeft !== null && (
-              <View style={[styles.banner, { backgroundColor: daysLeft <= 7 ? '#FFF7ED' : '#EFF6FF', borderColor: daysLeft <= 7 ? '#FED7AA' : '#BFDBFE' }]}>
+              <View style={[styles.banner, { backgroundColor: daysLeft <= 7 ? colors.warningBg : colors.primaryTint, borderColor: daysLeft <= 7 ? colors.warningBorder : colors.primaryTintB }]}>
                 <Text style={[styles.bannerTitle, { color: daysLeft <= 7 ? '#C2410C' : '#1E40AF' }]}>
                   {daysLeft <= 7 ? '⚠ ' : '🎁 '}Período de prueba — {daysLeft} día{daysLeft !== 1 ? 's' : ''} restante{daysLeft !== 1 ? 's' : ''}
                 </Text>
@@ -196,9 +196,9 @@ export default function PlanModal({ visible, onClose, user }: PlanModalProps) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = () => StyleSheet.create({
   overlay: { flex: 1, backgroundColor: 'rgba(15,23,42,0.45)', alignItems: 'center', justifyContent: 'center', padding: 16 },
-  card: { backgroundColor: '#fff', borderRadius: radius.lg, width: '100%', maxHeight: '88%', overflow: 'hidden' },
+  card: { backgroundColor: colors.bgCard, borderRadius: radius.lg, width: '100%', maxHeight: '88%', overflow: 'hidden' },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: colors.border },
   title: { fontSize: 16, fontWeight: '800', color: colors.text },
   closeIcon: { fontSize: 18, color: colors.textMuted },
@@ -238,3 +238,17 @@ const styles = StyleSheet.create({
 
   footNote: { fontSize: 11, color: colors.textMuted, textAlign: 'center', marginTop: 4, marginBottom: 4 },
 });
+
+// Estilos VIVOS: se reconstruyen cuando cambia el tema (dark mode).
+let __stylesVersion = -1;
+let __styles: ReturnType<typeof createStyles> | null = null;
+export const styles = new Proxy({} as ReturnType<typeof createStyles>, {
+  get(_t, prop) {
+    if (__stylesVersion !== themeRef.version || !__styles) {
+      __styles = createStyles();
+      __stylesVersion = themeRef.version;
+    }
+    return __styles[prop as keyof ReturnType<typeof createStyles>];
+  },
+});
+

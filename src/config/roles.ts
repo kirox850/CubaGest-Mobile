@@ -5,12 +5,12 @@
 export const ROLES: Record<string, { label: string; color: string; perms: string[] }> = {
   admin: {
     label: 'Administrador',
-    color: '#3B82F6',
+    color: '#048afb',
     perms: ['dashboard', 'inventario', 'facturacion', 'contabilidad', 'cierre', 'usuarios', 'config', 'transferencias', 'auditoria', 'monedas'],
   },
   cajero: {
     label: 'Cajero',
-    color: '#3B82F6',
+    color: '#048afb',
     perms: ['dashboard', 'pos', 'facturacion', 'cierre', 'transferencias', 'auditoria'],
   },
   contador: {

@@ -6,7 +6,7 @@ import {
 import { useFocusEffect } from '@react-navigation/native';
 import { ClosingAPI, LocationsAPI } from '../api/endpoints';
 import { useAuth } from '../context/AuthContext';
-import { colors } from '../config/theme';
+import { colors, themeRef } from '../config/theme';
 import { Badge, EmptyState, ErrorBanner, Spinner } from '../components/UI';
 import type { Closing, ClosingItem, ClosingPreview, InventoryReading, Location } from '../types';
 
@@ -167,13 +167,13 @@ export default function CierreCajaScreen() {
                     </View>
                     <View style={{ gap: 4, alignItems: 'flex-end' }}>
                       {hasShortage && <Badge label="⚠ Faltantes" color="#F97316" />}
-                      <Badge label={`${c.totalSales} ventas`} color="#3B82F6" />
+                      <Badge label={`${c.totalSales} ventas`} color={colors.primary} />
                     </View>
                   </View>
                   <View style={styles.cardStatsRow}>
                     <View>
                       <Text style={styles.statLabel}>Total ingresos</Text>
-                      <Text style={[styles.statValue, { color: '#10B981' }]}>{fmt(c.totalIncome)} CUP</Text>
+                      <Text style={[styles.statValue, { color: colors.success }]}>{fmt(c.totalIncome)} CUP</Text>
                     </View>
                     <View>
                       <Text style={styles.statLabel}>Efectivo</Text>
@@ -272,7 +272,7 @@ export default function CierreCajaScreen() {
                     <Text style={styles.cardLoc}>{locationName(r.locationId)}</Text>
                     {r.takenBy?.name ? <Text style={styles.cardSub}>Por {r.takenBy.name}</Text> : null}
                   </View>
-                  {isRec && <Badge label="Recomendado" color="#3B82F6" />}
+                  {isRec && <Badge label="Recomendado" color={colors.primary} />}
                 </TouchableOpacity>
               );
             }}
@@ -331,7 +331,7 @@ export default function CierreCajaScreen() {
                   <Text style={styles.cardSub}>
                     Inicial: {item.stockInitial} · Vendido: {item.stockSold} · Esperado: {item.stockExpected} {item.unit}
                   </Text>
-                  <Text style={[styles.cardSub, { color: '#10B981' }]}>Ingreso: ${fmt(item.income)}</Text>
+                  <Text style={[styles.cardSub, { color: colors.success }]}>Ingreso: ${fmt(item.income)}</Text>
                 </View>
                 <View style={{ alignItems: 'flex-end', gap: 4 }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
@@ -400,7 +400,7 @@ export default function CierreCajaScreen() {
         <View style={styles.detailGrid}>
           <View style={styles.detailCard}>
             <Text style={styles.statLabel}>Total ingresos</Text>
-            <Text style={[styles.detailValue, { color: '#10B981' }]}>{fmt(c.totalIncome)}</Text>
+            <Text style={[styles.detailValue, { color: colors.success }]}>{fmt(c.totalIncome)}</Text>
           </View>
           <View style={styles.detailCard}>
             <Text style={styles.statLabel}>Efectivo</Text>
@@ -412,7 +412,7 @@ export default function CierreCajaScreen() {
           </View>
           <View style={styles.detailCard}>
             <Text style={styles.statLabel}>Ventas</Text>
-            <Text style={[styles.detailValue, { color: '#3B82F6' }]}>{c.totalSales}</Text>
+            <Text style={[styles.detailValue, { color: colors.primary }]}>{c.totalSales}</Text>
           </View>
         </View>
 
@@ -435,7 +435,7 @@ export default function CierreCajaScreen() {
                   <Text style={styles.cardSub}>
                     Inicial: {item.stockInitial} · Vendido: {item.stockSold} · Esperado: {item.stockExpected} · Físico: {item.stockValidated} {item.unit}
                   </Text>
-                  <Text style={[styles.cardSub, { color: '#10B981' }]}>Ingreso: ${fmt(item.income)}</Text>
+                  <Text style={[styles.cardSub, { color: colors.success }]}>Ingreso: ${fmt(item.income)}</Text>
                 </View>
                 <Text style={{ fontWeight: '800', fontSize: 13, color: hasS ? '#F97316' : '#10B981' }}>
                   {hasS ? `-${item.shortage}` : '✓'}
@@ -451,48 +451,62 @@ export default function CierreCajaScreen() {
   return null;
 }
 
-const styles = StyleSheet.create({
-  wrap: { flex: 1, backgroundColor: '#F8FAFC', padding: 12 },
+const createStyles = () => StyleSheet.create({
+  wrap: { flex: 1, backgroundColor: colors.bg, padding: 12 },
   header: { marginBottom: 8 },
-  title: { fontSize: 20, fontWeight: '800', color: '#1E293B' },
+  title: { fontSize: 20, fontWeight: '800', color: colors.text },
   subtitle: { fontSize: 12, color: colors.textMuted, marginTop: 2, marginBottom: 10 },
-  primaryBtn: { backgroundColor: '#3B82F6', borderRadius: 12, paddingVertical: 12, alignItems: 'center', marginBottom: 8 },
+  primaryBtn: { backgroundColor: colors.primary, borderRadius: 12, paddingVertical: 12, alignItems: 'center', marginBottom: 8 },
   primaryBtnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
-  secondaryBtn: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 12, paddingVertical: 12, alignItems: 'center', marginBottom: 8 },
-  secondaryBtnText: { color: '#1E293B', fontWeight: '700', fontSize: 14 },
+  secondaryBtn: { backgroundColor: colors.bgCard, borderWidth: 1, borderColor: colors.border, borderRadius: 12, paddingVertical: 12, alignItems: 'center', marginBottom: 8 },
+  secondaryBtnText: { color: colors.text, fontWeight: '700', fontSize: 14 },
   backBtn: { marginBottom: 8 },
-  backText: { color: '#3B82F6', fontWeight: '700', fontSize: 14 },
-  card: { backgroundColor: '#fff', borderRadius: 14, borderWidth: 1, borderColor: '#E2E8F0', padding: 14, marginBottom: 10 },
+  backText: { color: colors.primary, fontWeight: '700', fontSize: 14 },
+  card: { backgroundColor: colors.bgCard, borderRadius: 14, borderWidth: 1, borderColor: colors.border, padding: 14, marginBottom: 10 },
   cardTopRow: { flexDirection: 'row', justifyContent: 'space-between' },
-  cardTitle: { fontWeight: '700', fontSize: 14, color: '#1E293B' },
+  cardTitle: { fontWeight: '700', fontSize: 14, color: colors.text },
   cardSub: { fontSize: 11, color: colors.textMuted, marginTop: 2 },
-  cardLoc: { fontSize: 11, color: '#3B82F6', fontWeight: '600', marginTop: 2 },
+  cardLoc: { fontSize: 11, color: colors.primary, fontWeight: '600', marginTop: 2 },
   cardStatsRow: { flexDirection: 'row', gap: 24, marginTop: 10 },
-  statLabel: { fontSize: 10, color: '#94A3B8', fontWeight: '700', textTransform: 'uppercase' },
-  statValue: { fontSize: 14, fontWeight: '800', color: '#1E293B', marginTop: 2 },
-  readingCard: { backgroundColor: '#fff', borderRadius: 14, borderWidth: 1, borderColor: '#E2E8F0', padding: 14, marginBottom: 10, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  readingCardRec: { borderWidth: 2, borderColor: '#3B82F6', backgroundColor: '#EFF6FF' },
-  readingTitle: { fontWeight: '700', fontSize: 14, color: '#1E293B' },
-  summaryInline: { flexDirection: 'row', justifyContent: 'space-around', backgroundColor: '#EFF6FF', borderRadius: 12, padding: 10, marginBottom: 10 },
-  infoBox: { backgroundColor: '#EFF6FF', borderWidth: 1, borderColor: '#BFDBFE', borderRadius: 12, padding: 10, marginBottom: 8 },
+  statLabel: { fontSize: 10, color: colors.textMuted, fontWeight: '700', textTransform: 'uppercase' },
+  statValue: { fontSize: 14, fontWeight: '800', color: colors.text, marginTop: 2 },
+  readingCard: { backgroundColor: colors.bgCard, borderRadius: 14, borderWidth: 1, borderColor: colors.border, padding: 14, marginBottom: 10, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  readingCardRec: { borderWidth: 2, borderColor: colors.primary, backgroundColor: colors.primaryTint },
+  readingTitle: { fontWeight: '700', fontSize: 14, color: colors.text },
+  summaryInline: { flexDirection: 'row', justifyContent: 'space-around', backgroundColor: colors.primaryTint, borderRadius: 12, padding: 10, marginBottom: 10 },
+  infoBox: { backgroundColor: colors.primaryTint, borderWidth: 1, borderColor: colors.primaryTintB, borderRadius: 12, padding: 10, marginBottom: 8 },
   infoText: { fontSize: 12, color: '#1E40AF' },
-  validateRow: { flexDirection: 'row', backgroundColor: '#fff', borderRadius: 12, borderWidth: 1, borderColor: '#E2E8F0', padding: 12, marginBottom: 8, alignItems: 'center' },
-  validateName: { fontWeight: '700', fontSize: 13, color: '#1E293B' },
-  validateInput: { borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 8, paddingVertical: 4, paddingHorizontal: 8, width: 70, textAlign: 'right', fontSize: 14, color: '#1E293B', backgroundColor: '#fff' },
-  notesInput: { borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 12, padding: 10, fontSize: 13, backgroundColor: '#fff', color: '#1E293B', minHeight: 50, textAlignVertical: 'top', marginBottom: 10 },
+  validateRow: { flexDirection: 'row', backgroundColor: colors.bgCard, borderRadius: 12, borderWidth: 1, borderColor: colors.border, padding: 12, marginBottom: 8, alignItems: 'center' },
+  validateName: { fontWeight: '700', fontSize: 13, color: colors.text },
+  validateInput: { borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingVertical: 4, paddingHorizontal: 8, width: 70, textAlign: 'right', fontSize: 14, color: colors.text, backgroundColor: colors.bgCard },
+  notesInput: { borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 10, fontSize: 13, backgroundColor: colors.bgCard, color: colors.text, minHeight: 50, textAlignVertical: 'top', marginBottom: 10 },
   warnBox: { backgroundColor: '#FFF7ED', borderWidth: 1, borderColor: '#FED7AA', borderRadius: 12, padding: 12, marginBottom: 10 },
   warnTitle: { fontWeight: '700', color: '#C2410C', marginBottom: 6, fontSize: 13 },
   warnText: { fontSize: 12, color: '#7C2D12', lineHeight: 18 },
   detailGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginVertical: 10 },
-  detailCard: { flexGrow: 1, minWidth: '45%', backgroundColor: '#fff', borderRadius: 12, borderWidth: 1, borderColor: '#E2E8F0', padding: 12 },
-  detailValue: { fontSize: 17, fontWeight: '800', color: '#1E293B', marginTop: 4 },
+  detailCard: { flexGrow: 1, minWidth: '45%', backgroundColor: colors.bgCard, borderRadius: 12, borderWidth: 1, borderColor: colors.border, padding: 12 },
+  detailValue: { fontSize: 17, fontWeight: '800', color: colors.text, marginTop: 4 },
   modalBg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 24 },
-  modalCard: { backgroundColor: '#fff', borderRadius: 14, padding: 20, maxHeight: '85%' },
-  modalTitle: { fontWeight: '800', fontSize: 16, marginBottom: 12, color: '#1E293B' },
+  modalCard: { backgroundColor: colors.bgCard, borderRadius: 14, padding: 20, maxHeight: '85%' },
+  modalTitle: { fontWeight: '800', fontSize: 16, marginBottom: 12, color: colors.text },
   modalActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 6 },
   cancelBtn: { paddingVertical: 10, paddingHorizontal: 16 },
-  saveBtn: { backgroundColor: '#3B82F6', paddingVertical: 10, paddingHorizontal: 18, borderRadius: 10 },
-  chip: { borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 20, paddingHorizontal: 12, paddingVertical: 6, backgroundColor: '#fff' },
-  chipActive: { backgroundColor: '#3B82F6', borderColor: '#3B82F6' },
-  chipText: { fontSize: 12, fontWeight: '600', color: '#1E293B' },
+  saveBtn: { backgroundColor: colors.primary, paddingVertical: 10, paddingHorizontal: 18, borderRadius: 10 },
+  chip: { borderWidth: 1, borderColor: colors.border, borderRadius: 20, paddingHorizontal: 12, paddingVertical: 6, backgroundColor: colors.bgCard },
+  chipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  chipText: { fontSize: 12, fontWeight: '600', color: colors.text },
 });
+
+// Estilos VIVOS: se reconstruyen cuando cambia el tema (dark mode).
+let __stylesVersion = -1;
+let __styles: ReturnType<typeof createStyles> | null = null;
+export const styles = new Proxy({} as ReturnType<typeof createStyles>, {
+  get(_t, prop) {
+    if (__stylesVersion !== themeRef.version || !__styles) {
+      __styles = createStyles();
+      __stylesVersion = themeRef.version;
+    }
+    return __styles[prop as keyof ReturnType<typeof createStyles>];
+  },
+});
+

@@ -6,7 +6,7 @@ import {
 import { useFocusEffect } from '@react-navigation/native';
 import { AccountingAPI, ExpensesAPI } from '../api/endpoints';
 import { useAuth } from '../context/AuthContext';
-import { colors } from '../config/theme';
+import { colors, themeRef } from '../config/theme';
 import { PAY_METHODS } from '../config/roles';
 import { EmptyState, ErrorBanner, Badge } from '../components/UI';
 import { shareCSV } from '../utils/csv';
@@ -26,6 +26,9 @@ export default function ContabilidadScreen() {
   const [modal, setModal] = useState(false);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ date: today(), concept: '', amount: '', category: 'Compras', method: 'efectivo' });
+  // Informe Fiscal en-app (paridad con la web): capa a pantalla completa con
+  // botón "← Volver" — nunca una pestaña huérfana.
+  const [showInforme, setShowInforme] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -68,17 +71,62 @@ export default function ContabilidadScreen() {
 
   return (
     <View style={styles.wrap}>
+      {/* ── Informe Fiscal (capa completa dentro del módulo) ── */}
+      {showInforme ? (
+        <View style={styles.informeWrap}>
+          <TouchableOpacity style={styles.informeBack} onPress={() => setShowInforme(false)}>
+            <Text style={styles.informeBackText}>← Volver</Text>
+          </TouchableOpacity>
+          <ScrollView contentContainerStyle={{ padding: 14 }}>
+            <View style={styles.informeCard}>
+              <Text style={styles.informeTitle}>CubaGest — Informe Fiscal</Text>
+              <Text style={styles.informeSub}>
+                Período: {new Date().toLocaleString('es-CU', { month: 'long', year: 'numeric' })} · Generado: {new Date().toLocaleDateString('es-CU')}
+              </Text>
+              <View style={styles.informeBox}>
+                {[
+                  ['Ingresos brutos por ventas', totalIncome, colors.text],
+                  ['Total egresos registrados', totalExp, colors.danger],
+                  ['Utilidad neta', net, net >= 0 ? colors.success : colors.danger],
+                ].map(([label, value, color]) => (
+                  <View key={label as string} style={styles.informeRow}>
+                    <Text style={[styles.informeLabel, { color: color as string }]}>{label}</Text>
+                    <Text style={[styles.informeValue, { color: color as string }]}>${fmt(Number(value))}</Text>
+                  </View>
+                ))}
+              </View>
+              <Text style={styles.informeDetTitle}>Detalle de Egresos</Text>
+              {expenses.length === 0 && <Text style={styles.informeEmpty}>Sin egresos registrados</Text>}
+              {expenses.map((e) => (
+                <View key={e.id} style={styles.informeRow}>
+                  <Text style={styles.informeLabel}>{(e.date || (e as any).createdAt || '').split('T')[0]} · {e.concept}</Text>
+                  <Text style={styles.informeValue}>${fmt(Number(e.amount))}</Text>
+                </View>
+              ))}
+              <Text style={styles.informeNote}>
+                Informe generado automáticamente por CubaGest para uso interno. Datos orientativos; consulte con su contador para la declaración oficial.
+              </Text>
+            </View>
+          </ScrollView>
+        </View>
+      ) : (
+      <>
       <ErrorBanner message={error} />
 
-      <TouchableOpacity
-        style={styles.csvBtn}
-        onPress={() => shareCSV('gastos', expenses as any, [
-          { key: 'date', label: 'Fecha' }, { key: 'category', label: 'Categoría' }, { key: 'concept', label: 'Concepto' },
-          { key: 'amount', label: 'Monto' }, { key: 'method', label: 'Método de pago' },
-        ])}
-      >
-        <Text style={styles.csvBtnText}>⇩ Exportar gastos (CSV)</Text>
-      </TouchableOpacity>
+      <View style={styles.actionsRow}>
+        <TouchableOpacity style={styles.actionBtn} onPress={() => setShowInforme(true)}>
+          <Text style={styles.actionBtnText}>📄 Informe Fiscal</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.actionBtn}
+          onPress={() => shareCSV('gastos', expenses as any, [
+            { key: 'date', label: 'Fecha' }, { key: 'category', label: 'Categoría' }, { key: 'concept', label: 'Concepto' },
+            { key: 'amount', label: 'Monto' }, { key: 'method', label: 'Método de pago' },
+          ])}
+        >
+          <Text style={styles.actionBtnText}>⇩ CSV</Text>
+        </TouchableOpacity>
+      </View>
 
       {/* Tabs */}
       <View style={styles.tabRow}>
@@ -140,7 +188,7 @@ export default function ContabilidadScreen() {
                 <Text style={styles.rowPrimary}>{e.concept}</Text>
                 <Text style={styles.rowSub}>{(e.date || e.createdAt || '').split('T')[0]} · {e.category}</Text>
               </View>
-              <Text style={[styles.rowAmt, { color: '#EF4444' }]}>${fmt(Number(e.amount))}</Text>
+              <Text style={[styles.rowAmt, { color: colors.danger }]}>${fmt(Number(e.amount))}</Text>
             </View>
           )}
         />
@@ -187,39 +235,82 @@ export default function ContabilidadScreen() {
           </View>
         </Modal>
       )}
+      </>
+      )}
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  wrap: { flex: 1, backgroundColor: '#F8FAFC' },
-  csvBtn: { backgroundColor: '#EFF6FF', borderWidth: 1, borderColor: '#BFDBFE', borderRadius: 10, paddingVertical: 9, alignItems: 'center', marginHorizontal: 12, marginBottom: 10 },
-  csvBtnText: { color: '#1D4ED8', fontWeight: '700', fontSize: 13 },
+const createStyles = () => StyleSheet.create({
+  wrap: { flex: 1, backgroundColor: colors.bg },
+  actionsRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 12, marginBottom: 10 },
+  actionBtn: {
+    flex: 1, backgroundColor: colors.primaryTint, borderWidth: 1, borderColor: colors.primaryTintB,
+    borderRadius: 10, paddingVertical: 9, alignItems: 'center',
+  },
+  actionBtnText: { color: colors.primary, fontWeight: '700', fontSize: 13 },
+
+  informeWrap: { flex: 1, backgroundColor: colors.bg },
+  informeBack: {
+    alignSelf: 'flex-start', marginHorizontal: 12, marginTop: 8, marginBottom: 2,
+    backgroundColor: colors.bgSecondary, borderWidth: 1, borderColor: colors.border,
+    borderRadius: 10, paddingVertical: 8, paddingHorizontal: 14,
+  },
+  informeBackText: { color: colors.text, fontWeight: '700', fontSize: 13.5 },
+  informeCard: {
+    backgroundColor: colors.bgCard, borderWidth: 1, borderColor: colors.border,
+    borderRadius: 14, padding: 16,
+  },
+  informeTitle: { fontSize: 17, fontWeight: '800', color: colors.primary, marginBottom: 3 },
+  informeSub: { fontSize: 12, color: colors.textMuted, marginBottom: 16 },
+  informeBox: { borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 12, marginBottom: 14 },
+  informeRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: colors.borderLight },
+  informeLabel: { fontSize: 13.5, flex: 1, color: colors.text },
+  informeValue: { fontSize: 13.5, fontWeight: '700', marginLeft: 10 },
+  informeDetTitle: { fontSize: 13.5, fontWeight: '800', color: colors.text, marginBottom: 4 },
+  informeEmpty: { fontSize: 12.5, color: colors.textMuted, fontStyle: 'italic', paddingVertical: 8 },
+  informeNote: { fontSize: 11, color: colors.textMuted, marginTop: 14, borderTopWidth: 1, borderTopColor: colors.borderLight, paddingTop: 10, lineHeight: 16 },
+  csvBtn: { backgroundColor: colors.primaryTint, borderWidth: 1, borderColor: colors.primaryTintB, borderRadius: 10, paddingVertical: 9, alignItems: 'center', marginHorizontal: 12, marginBottom: 10 },
+  csvBtnText: { color: colors.primary, fontWeight: '700', fontSize: 13 },
   tabRow: { flexDirection: 'row', backgroundColor: colors.bgSecondary, margin: 12, borderRadius: 14, padding: 4 },
   tabBtn: { flex: 1, paddingVertical: 8, alignItems: 'center', borderRadius: 7 },
-  tabBtnActive: { backgroundColor: '#3B82F6' },
+  tabBtnActive: { backgroundColor: colors.primary },
   tabText: { fontSize: 13, fontWeight: '600', color: colors.textMuted },
   tabTextActive: { color: '#fff' },
-  summaryBox: { backgroundColor: '#fff', borderRadius: 12, borderWidth: 1, borderColor: '#E2E8F0', padding: 16, marginBottom: 12 },
-  summaryTitle: { fontWeight: '700', fontSize: 15, color: '#1E293B', marginBottom: 12 },
+  summaryBox: { backgroundColor: colors.bgCard, borderRadius: 12, borderWidth: 1, borderColor: colors.border, padding: 16, marginBottom: 12 },
+  summaryTitle: { fontWeight: '700', fontSize: 15, color: colors.text, marginBottom: 12 },
   summaryRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#E2E8F0' },
-  summaryLabel: { fontSize: 14, color: '#1E293B' },
+  summaryLabel: { fontSize: 14, color: colors.text },
   summaryValue: { fontSize: 14, fontWeight: '700' },
-  addBtn: { backgroundColor: '#3B82F6', borderRadius: 14, paddingVertical: 13, alignItems: 'center' },
+  addBtn: { backgroundColor: colors.primary, borderRadius: 14, paddingVertical: 13, alignItems: 'center' },
   addBtnText: { color: '#fff', fontWeight: '700', fontSize: 15 },
-  row: { flexDirection: 'row', backgroundColor: '#fff', borderRadius: 14, borderWidth: 1, borderColor: '#E2E8F0', padding: 12, marginBottom: 8, alignItems: 'center' },
-  rowPrimary: { fontWeight: '600', fontSize: 13, color: '#1E293B' },
+  row: { flexDirection: 'row', backgroundColor: colors.bgCard, borderRadius: 14, borderWidth: 1, borderColor: colors.border, padding: 12, marginBottom: 8, alignItems: 'center' },
+  rowPrimary: { fontWeight: '600', fontSize: 13, color: colors.text },
   rowSub: { fontSize: 11, color: colors.textMuted, marginTop: 2 },
-  rowAmt: { fontWeight: '800', fontSize: 15, color: '#1E293B' },
+  rowAmt: { fontWeight: '800', fontSize: 15, color: colors.text },
   modalBg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  modalCard: { backgroundColor: '#fff', borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 20 },
-  modalTitle: { fontWeight: '800', fontSize: 16, marginBottom: 14, color: '#1E293B' },
-  input: { borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 12, paddingHorizontal: 10, paddingVertical: 9, fontSize: 13, backgroundColor: '#F8FAFC', marginBottom: 10, color: '#1E293B' },
+  modalCard: { backgroundColor: colors.bgCard, borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 20 },
+  modalTitle: { fontWeight: '800', fontSize: 16, marginBottom: 14, color: colors.text },
+  input: { borderWidth: 1, borderColor: colors.border, borderRadius: 12, paddingHorizontal: 10, paddingVertical: 9, fontSize: 13, backgroundColor: colors.bg, marginBottom: 10, color: colors.text },
   payRow: { flexDirection: 'row', gap: 8, marginBottom: 10 },
-  chip: { borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 20, paddingHorizontal: 12, paddingVertical: 6 },
-  chipActive: { backgroundColor: '#3B82F6', borderColor: '#3B82F6' },
-  chipText: { fontSize: 12, fontWeight: '600', color: '#1E293B' },
+  chip: { borderWidth: 1, borderColor: colors.border, borderRadius: 20, paddingHorizontal: 12, paddingVertical: 6 },
+  chipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  chipText: { fontSize: 12, fontWeight: '600', color: colors.text },
   modalActions: { flexDirection: 'row', gap: 8, justifyContent: 'flex-end', marginTop: 12 },
-  btnPrimary: { backgroundColor: '#3B82F6', paddingVertical: 10, paddingHorizontal: 18, borderRadius: 8 },
-  btnSecondary: { backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#E2E8F0', paddingVertical: 10, paddingHorizontal: 14, borderRadius: 8 },
+  btnPrimary: { backgroundColor: colors.primary, paddingVertical: 10, paddingHorizontal: 18, borderRadius: 8 },
+  btnSecondary: { backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.border, paddingVertical: 10, paddingHorizontal: 14, borderRadius: 8 },
 });
+
+// Estilos VIVOS: se reconstruyen cuando cambia el tema (dark mode).
+let __stylesVersion = -1;
+let __styles: ReturnType<typeof createStyles> | null = null;
+export const styles = new Proxy({} as ReturnType<typeof createStyles>, {
+  get(_t, prop) {
+    if (__stylesVersion !== themeRef.version || !__styles) {
+      __styles = createStyles();
+      __stylesVersion = themeRef.version;
+    }
+    return __styles[prop as keyof ReturnType<typeof createStyles>];
+  },
+});
+

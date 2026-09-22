@@ -77,16 +77,46 @@ export async function apiFetch<T = unknown>(
     clearTimeout(timeout);
     if (res.status === 204) return null as T;
 
-    // Token expirado o inválido — limpiar sesión y avisar a la app.
-    if (res.status === 401) {
+    // El mensaje REAL del servidor ("Correo o contraseña incorrectos",
+    // "Demasiados intentos"...) debe llegar siempre a la UI — antes el 401
+    // del login caía en el bloque de "sesión expirada" y el usuario veía
+    // un error genérico/confuso.
+    const raw = (await res.json().catch(() => null)) as Record<string, unknown> | null;
+    const serverError = (raw?.error || raw?.message) as string | undefined;
+
+    // Token expirado o inválido SOLO en peticiones autenticadas — el 401 de
+    // login (auth:false) es simplemente "credenciales incorrectas".
+    if (res.status === 401 && auth) {
+      // Renovación transparente (paridad con web): si hay refresh token,
+      // intentamos un solo refresh + reintento antes de matar la sesión.
+      // Así el offline-first no se rompe cuando el accessToken expira pero
+      // la sesión sigue válida (token de 9h + refresh del backend).
+      const refreshToken = await getRefreshToken();
+      if (refreshToken && !opts.__isRetry) {
+        try {
+          const r = await fetch(`${API_BASE_URL}/auth/refresh`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ refreshToken }),
+          });
+          const rd = await r.json().catch(() => null);
+          const newToken = rd?.accessToken || rd?.data?.accessToken;
+          if (r.ok && newToken) {
+            await AsyncStorage.setItem(TOKEN_KEY, newToken);
+            // Reintenta la petición original UNA vez con el token nuevo
+            return apiFetch<T>(path, { ...opts, __isRetry: true });
+          }
+        } catch {
+          // refresh falló (red): cae al flujo de sesión expirada de abajo
+        }
+      }
       await setToken(null);
       emitSessionExpired();
-      throw new Error('Sesión expirada');
+      throw new Error(serverError || 'Tu sesión expiró. Inicia sesión de nuevo.');
     }
 
-    const raw = (await res.json()) as Record<string, unknown>;
     if (!res.ok) {
-      throw new Error((raw?.error as string) || `Error ${res.status}`);
+      throw new Error(serverError || `Error ${res.status}`);
     }
 
     // El backend siempre envuelve la respuesta con { ok, ... }. Algunos
@@ -100,7 +130,7 @@ export async function apiFetch<T = unknown>(
   } catch (e) {
     clearTimeout(timeout);
     if (e instanceof Error && e.name === 'AbortError') {
-      throw new Error('Sin conexión');
+      throw new Error('Sin conexión con el servidor — revisa tu internet e inténtalo de nuevo');
     }
     throw e;
   }

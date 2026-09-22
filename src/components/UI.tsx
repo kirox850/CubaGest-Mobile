@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
-import { colors, radius, shadow } from '../config/theme';
+import { colors, radius, shadow, themeRef } from '../config/theme';
 
 interface BadgeProps {
   label: string;
@@ -89,7 +89,7 @@ export const StatCard = ({ label, value, sub, color, icon }: StatCardProps) => (
   </View>
 );
 
-const styles = StyleSheet.create({
+const createStyles = () => StyleSheet.create({
   badge: {
     paddingHorizontal: 10,
     paddingVertical: 3,
@@ -190,3 +190,17 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
   },
 });
+
+// Estilos VIVOS: se reconstruyen cuando cambia el tema (dark mode).
+let __stylesVersion = -1;
+let __styles: ReturnType<typeof createStyles> | null = null;
+export const styles = new Proxy({} as ReturnType<typeof createStyles>, {
+  get(_t, prop) {
+    if (__stylesVersion !== themeRef.version || !__styles) {
+      __styles = createStyles();
+      __stylesVersion = themeRef.version;
+    }
+    return __styles[prop as keyof ReturnType<typeof createStyles>];
+  },
+});
+

@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, Text, StyleSheet, Modal, ScrollView, TouchableOpacity } from 'react-native';
-import { colors, radius, spacing } from '../config/theme';
+import { colors, radius, spacing, themeRef } from '../config/theme';
 
 // Parser de markdown ligero (#, ##, **negrita**, - listas)
 function renderLegalMarkdown(md: string): React.ReactNode[] {
@@ -89,9 +89,9 @@ export default function LegalModal({ visible, title, content, onClose }: LegalMo
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = () => StyleSheet.create({
   overlay: { flex: 1, backgroundColor: 'rgba(15,23,42,0.45)', alignItems: 'center', justifyContent: 'center', padding: 16 },
-  card: { backgroundColor: '#fff', borderRadius: radius.lg, width: '100%', maxHeight: '85%', overflow: 'hidden' },
+  card: { backgroundColor: colors.bgCard, borderRadius: radius.lg, width: '100%', maxHeight: '85%', overflow: 'hidden' },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: colors.border },
   title: { fontSize: 16, fontWeight: '800', color: colors.text },
   closeIcon: { fontSize: 18, color: colors.textMuted },
@@ -109,3 +109,17 @@ const styles = StyleSheet.create({
   listBullet: { color: colors.textMuted, marginRight: 6, fontSize: 13 },
   listText: { flex: 1, fontSize: 13, lineHeight: 19, color: colors.textSecondary },
 });
+
+// Estilos VIVOS: se reconstruyen cuando cambia el tema (dark mode).
+let __stylesVersion = -1;
+let __styles: ReturnType<typeof createStyles> | null = null;
+export const styles = new Proxy({} as ReturnType<typeof createStyles>, {
+  get(_t, prop) {
+    if (__stylesVersion !== themeRef.version || !__styles) {
+      __styles = createStyles();
+      __stylesVersion = themeRef.version;
+    }
+    return __styles[prop as keyof ReturnType<typeof createStyles>];
+  },
+});
+
