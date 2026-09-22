@@ -7,7 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { DiscountsAPI, LocationsAPI } from '../api/endpoints';
 import { colors, radius, shadow, themeRef } from '../config/theme';
-import { Badge, EmptyState, ErrorBanner, SectionHeader } from '../components/UI';
+import { Badge, EmptyState, ErrorBanner, SectionHeader, PageHeader } from '../components/UI';
 
 // ─── DESCUENTOS (admin) — paridad con DiscountsAdmin de la web ───────────────
 // MISMO payload que la web: los enums del backend son EXACTOS
@@ -103,8 +103,8 @@ export default function DiscountsScreen() {
       >
         <ErrorBanner message={error} />
 
-        <SectionHeader
-          title="Crear descuento"
+        <PageHeader
+          title="Descuentos"
           subtitle="Solo el administrador puede crearlos o eliminarlos. Los de tipo Venta se aplican al total en el POS."
         />
 

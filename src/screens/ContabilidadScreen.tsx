@@ -7,13 +7,13 @@ import { useFocusEffect } from '@react-navigation/native';
 import { AccountingAPI, ExpensesAPI } from '../api/endpoints';
 import { useAuth } from '../context/AuthContext';
 import { colors, themeRef } from '../config/theme';
-import { PAY_METHODS } from '../config/roles';
-import { EmptyState, ErrorBanner, Badge } from '../components/UI';
+import { PAY_METHODS, EXPENSE_CATS } from '../config/roles';
+import { EmptyState, ErrorBanner, Badge, Btn, Inp, Sel, PageHeader } from '../components/UI';
+import Icon from '../components/Icon';
 import { shareCSV } from '../utils/csv';
 import type { AccountingSummary, IncomeRow, Expense } from '../types';
 
 const fmt = (n: number) => Number(n || 0).toFixed(2);
-const EXPENSE_CATS = ['Compras', 'Nomina', 'Servicios', 'Operaciones', 'Impuestos', 'Otros'];
 const today = () => new Date().toISOString().split('T')[0];
 
 export default function ContabilidadScreen() {
@@ -113,22 +113,17 @@ export default function ContabilidadScreen() {
       <>
       <ErrorBanner message={error} />
 
-      <View style={styles.actionsRow}>
-        <TouchableOpacity style={styles.actionBtn} onPress={() => setShowInforme(true)}>
-          <Text style={styles.actionBtnText}>📄 Informe Fiscal</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.actionBtn}
-          onPress={() => shareCSV('gastos', expenses as any, [
-            { key: 'date', label: 'Fecha' }, { key: 'category', label: 'Categoría' }, { key: 'concept', label: 'Concepto' },
-            { key: 'amount', label: 'Monto' }, { key: 'method', label: 'Método de pago' },
-          ])}
-        >
-          <Text style={styles.actionBtnText}>⇩ CSV</Text>
-        </TouchableOpacity>
+      {/* Header — igual que la web: título + botones Actualizar/Informe/Gasto */}
+      <View style={styles.header}>
+        <PageHeader title="Contabilidad" subtitle="Registro contable" />
+        <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+          <Btn variant="secondary" icon="refresh" label="Actualizar" onPress={load} />
+          <Btn variant="secondary" icon="print" label="Informe Fiscal" onPress={() => setShowInforme(true)} />
+          <Btn icon="plus" label="Registrar Gasto" onPress={() => setModal(true)} />
+        </View>
       </View>
 
-      {/* Tabs */}
+      {/* Tabs — segment control como la web (fondo input-bg, radio 7) */}
       <View style={styles.tabRow}>
         {[['resumen', 'Resumen'], ['ingresos', 'Ingresos'], ['gastos', 'Egresos']].map(([v, l]) => (
           <TouchableOpacity key={v} style={[styles.tabBtn, tab === v && styles.tabBtnActive]} onPress={() => setTab(v)}>
@@ -181,14 +176,17 @@ export default function ContabilidadScreen() {
           data={expenses}
           keyExtractor={e => e.id}
           contentContainerStyle={{ padding: 12 }}
-          ListEmptyComponent={<EmptyState text="No hay egresos" />}
+          ListEmptyComponent={<EmptyState text="No hay egresos registrados" />}
           renderItem={({ item: e }) => (
             <View style={styles.row}>
               <View style={{ flex: 1 }}>
                 <Text style={styles.rowPrimary}>{e.concept}</Text>
-                <Text style={styles.rowSub}>{(e.date || e.createdAt || '').split('T')[0]} · {e.category}</Text>
+                <View style={{ flexDirection: 'row', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
+                  <Badge label={e.category || '—'} color="#5a3a1a" />
+                  <Badge label={PAY_METHODS.find(p => p.id === e.method)?.label || e.method || '—'} color={colors.primary} />
+                </View>
               </View>
-              <Text style={[styles.rowAmt, { color: colors.danger }]}>${fmt(Number(e.amount))}</Text>
+              <Text style={[styles.rowAmt, { color: colors.primary }]}>${fmt(Number(e.amount))}</Text>
             </View>
           )}
         />
@@ -199,30 +197,26 @@ export default function ContabilidadScreen() {
           <View style={styles.modalBg}>
             <View style={styles.modalCard}>
               <Text style={styles.modalTitle}>Registrar Egreso</Text>
-              <TextInput style={styles.input} value={form.date} onChangeText={v => setForm(f => ({ ...f, date: v }))} placeholder="Fecha (YYYY-MM-DD)" placeholderTextColor={colors.textMuted} />
-              <TextInput style={styles.input} value={form.concept} onChangeText={v => setForm(f => ({ ...f, concept: v }))} placeholder="Concepto *" placeholderTextColor={colors.textMuted} />
-              <TextInput style={styles.input} value={form.amount} onChangeText={v => setForm(f => ({ ...f, amount: v }))} placeholder="Monto CUP *" keyboardType="decimal-pad" placeholderTextColor={colors.textMuted} />
-              {/* Metodo de pago del egreso — paridad con la web */}
-              <View style={styles.payRow}>
-                {PAY_METHODS.map(m => (
-                  <TouchableOpacity
-                    key={m.id}
-                    style={[styles.chip, form.method === m.id && styles.chipActive]}
-                    onPress={() => setForm(f => ({ ...f, method: m.id }))}
-                  >
-                    <Text style={[styles.chipText, form.method === m.id && { color: '#fff' }]}>{m.label}</Text>
-                  </TouchableOpacity>
-                ))}
+              <Inp style={{ marginBottom: 10 }} value={form.date} onChangeText={v => setForm(f => ({ ...f, date: v }))} placeholder="Fecha (YYYY-MM-DD)" />
+              <Inp style={{ marginBottom: 10 }} value={form.concept} onChangeText={v => setForm(f => ({ ...f, concept: v }))} placeholder="Concepto *" />
+              <Inp style={{ marginBottom: 10 }} value={form.amount} onChangeText={v => setForm(f => ({ ...f, amount: v }))} placeholder="Monto CUP *" keyboardType="decimal-pad" />
+              {/* Método y categoría — selects nativos, igual que la web */}
+              <View style={{ marginBottom: 10 }}>
+                <Text style={styles.fieldLabel}>Método de pago</Text>
+                <Sel
+                  value={form.method}
+                  onValueChange={(v: string) => setForm(f => ({ ...f, method: v }))}
+                  items={PAY_METHODS.map(m => ({ label: m.label, value: m.id }))}
+                />
               </View>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
-                <View style={{ flexDirection: 'row', gap: 6 }}>
-                  {EXPENSE_CATS.map(c => (
-                    <TouchableOpacity key={c} style={[styles.chip, form.category === c && styles.chipActive]} onPress={() => setForm(f => ({ ...f, category: c }))}>
-                      <Text style={[styles.chipText, form.category === c && { color: '#fff' }]}>{c}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </ScrollView>
+              <View style={{ marginBottom: 10 }}>
+                <Text style={styles.fieldLabel}>Categoría</Text>
+                <Sel
+                  value={form.category}
+                  onValueChange={(v: string) => setForm(f => ({ ...f, category: v }))}
+                  items={EXPENSE_CATS.map(c => ({ label: c, value: c }))}
+                />
+              </View>
               <View style={styles.modalActions}>
                 <TouchableOpacity style={styles.btnSecondary} onPress={() => setModal(false)}>
                   <Text style={{ fontWeight: '600' }}>Cancelar</Text>
@@ -243,12 +237,8 @@ export default function ContabilidadScreen() {
 
 const createStyles = () => StyleSheet.create({
   wrap: { flex: 1, backgroundColor: colors.bg },
-  actionsRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 12, marginBottom: 10 },
-  actionBtn: {
-    flex: 1, backgroundColor: colors.primaryTint, borderWidth: 1, borderColor: colors.primaryTintB,
-    borderRadius: 10, paddingVertical: 9, alignItems: 'center',
-  },
-  actionBtnText: { color: colors.primary, fontWeight: '700', fontSize: 13 },
+  header: { paddingHorizontal: 16, paddingTop: 12, marginBottom: 12, gap: 12 },
+  fieldLabel: { fontSize: 12, fontWeight: '600', color: colors.textMuted, textTransform: 'uppercase', marginBottom: 4 },
 
   informeWrap: { flex: 1, backgroundColor: colors.bg },
   informeBack: {
@@ -272,8 +262,8 @@ const createStyles = () => StyleSheet.create({
   informeNote: { fontSize: 11, color: colors.textMuted, marginTop: 14, borderTopWidth: 1, borderTopColor: colors.borderLight, paddingTop: 10, lineHeight: 16 },
   csvBtn: { backgroundColor: colors.primaryTint, borderWidth: 1, borderColor: colors.primaryTintB, borderRadius: 10, paddingVertical: 9, alignItems: 'center', marginHorizontal: 12, marginBottom: 10 },
   csvBtnText: { color: colors.primary, fontWeight: '700', fontSize: 13 },
-  tabRow: { flexDirection: 'row', backgroundColor: colors.bgSecondary, margin: 12, borderRadius: 14, padding: 4 },
-  tabBtn: { flex: 1, paddingVertical: 8, alignItems: 'center', borderRadius: 7 },
+  tabRow: { flexDirection: 'row', backgroundColor: colors.inputBg, marginHorizontal: 16, borderRadius: 12, padding: 4, alignSelf: 'flex-start' },
+  tabBtn: { paddingVertical: 7, paddingHorizontal: 16, alignItems: 'center', borderRadius: 7 },
   tabBtnActive: { backgroundColor: colors.primary },
   tabText: { fontSize: 13, fontWeight: '600', color: colors.textMuted },
   tabTextActive: { color: '#fff' },

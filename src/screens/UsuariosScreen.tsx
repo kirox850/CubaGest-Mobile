@@ -4,7 +4,8 @@ import { useFocusEffect } from '@react-navigation/native';
 import { UsersAPI } from '../api/endpoints';
 import { ROLES } from '../config/roles';
 import { colors, themeRef } from '../config/theme';
-import { Badge, EmptyState, ErrorBanner } from '../components/UI';
+import { Badge, EmptyState, ErrorBanner, Btn, Inp, Sel } from '../components/UI';
+import Icon from '../components/Icon';
 import type { User } from '../types';
 
 export default function UsuariosScreen() {
@@ -98,11 +99,13 @@ export default function UsuariosScreen() {
 
   return (
     <View style={styles.wrap}>
+      {/* Header — igual que la web: título + botón Nuevo Usuario */}
       <View style={styles.header}>
-        <Text style={styles.title}>Usuarios</Text>
-        <TouchableOpacity style={styles.addBtn} onPress={openNew}>
-          <Text style={styles.addBtnText}>+ Usuario</Text>
-        </TouchableOpacity>
+        <View style={{ flexShrink: 1 }}>
+          <Text style={styles.title}>Usuarios</Text>
+          <Text style={styles.subtitle}>{users.length} usuarios</Text>
+        </View>
+        <Btn icon="plus" label="Nuevo Usuario" onPress={openNew} />
       </View>
       <ErrorBanner message={error} />
 
@@ -112,69 +115,68 @@ export default function UsuariosScreen() {
         contentContainerStyle={{ paddingBottom: 24 }}
         ListEmptyComponent={<EmptyState text="No hay usuarios" />}
         renderItem={({ item }) => (
-          <TouchableOpacity style={styles.row} onPress={() => openEdit(item)}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.name}>
-                {item.name}
-                {item.pending ? ' ⚠' : ''}
-              </Text>
+          <View style={[styles.row, { opacity: item.active === false ? 0.6 : 1 }]}>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={styles.name}>{item.name}</Text>
               <Text style={styles.email}>{item.email}</Text>
+              <View style={{ flexDirection: 'row', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
+                <Badge label={ROLES[item.role]?.label || item.role} color={ROLES[item.role]?.color} />
+                {item.active === false ? (
+                  <Badge label="Inactivo (baja)" color="#DC2626" />
+                ) : item.pending ? (
+                  <Badge label="Pendiente de activar" color="#F97316" />
+                ) : (
+                  <Badge label="Activo" color="#10B981" />
+                )}
+              </View>
+              <View style={{ flexDirection: 'row', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
+                <Btn variant="ghost" label="Editar" onPress={() => openEdit(item)} style={{ paddingVertical: 4, paddingHorizontal: 8 }} />
+                <Btn variant="ghost" label={resendingId === item.id ? '...' : '🔗 Link'} onPress={() => resendLink(item)} disabled={resendingId === item.id} style={{ paddingVertical: 4, paddingHorizontal: 8 }} />
+                {item.active !== false && (
+                  <Btn variant="danger" label="Dar de baja" onPress={() => deactivate(item)} style={{ paddingVertical: 4, paddingHorizontal: 8 }} />
+                )}
+              </View>
             </View>
-            <View style={{ alignItems: 'flex-end', gap: 6 }}>
-              <Badge label={ROLES[item.role]?.label || item.role} color={ROLES[item.role]?.color} />
-              {item.pending && (
-                <TouchableOpacity onPress={() => resendLink(item)} disabled={resendingId === item.id}>
-                  <Text style={styles.resendLink}>{resendingId === item.id ? 'Enviando...' : 'Reenviar link'}</Text>
-                </TouchableOpacity>
-              )}
-              {item.active && !item.pending && (
-                <TouchableOpacity onPress={() => deactivate(item)}>
-                  <Text style={styles.deactivateLink}>Desactivar</Text>
-                </TouchableOpacity>
-              )}
-            </View>
-          </TouchableOpacity>
+          </View>
         )}
       />
 
-      {/* Modal crear/editar */}
+      {/* Modal crear/editar — mismos campos que la web */}
       <Modal visible={modal} transparent animationType="fade" onRequestClose={() => setModal(false)}>
         <View style={styles.modalBg}>
           <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>{editTarget ? 'Editar usuario' : 'Nuevo usuario'}</Text>
+            <Text style={styles.modalTitle}>{editTarget ? 'Editar Usuario' : 'Nuevo Usuario'}</Text>
             {!editTarget && (
               <Text style={styles.hint}>
-                El usuario recibirá un link para establecer su contraseña. También puedes definir una inicial.
+                No se pide contraseña acá — apenas crees la cuenta, le llega un correo al usuario para que la elija él mismo.
               </Text>
             )}
-            <TextInput style={styles.input} placeholder="Nombre completo" value={name} onChangeText={setName} placeholderTextColor={colors.textMuted} />
-            <TextInput
-              style={styles.input}
-              placeholder="Correo electronico"
+            <Inp style={{ marginBottom: 10 }} placeholder="Nombre completo" value={name} onChangeText={setName} />
+            <Inp
+              style={{ marginBottom: 10 }}
+              placeholder="Correo electrónico"
               value={email}
               onChangeText={setEmail}
               autoCapitalize="none"
               keyboardType="email-address"
               editable={!editTarget}
-              placeholderTextColor={colors.textMuted}
             />
-            {!editTarget && (
-              <TextInput style={styles.input} placeholder="Contrasena inicial (opcional)" value={password} onChangeText={setPassword} secureTextEntry placeholderTextColor={colors.textMuted} />
-            )}
-            <View style={styles.chipsRow}>
-              {Object.entries(ROLES).map(([key, r]) => (
-                <TouchableOpacity key={key} onPress={() => setRole(key as User['role'])} style={[styles.chip, role === key && { backgroundColor: r.color, borderColor: r.color }]}>
-                  <Text style={[styles.chipText, role === key && styles.chipTextActive]}>{r.label}</Text>
-                </TouchableOpacity>
-              ))}
+            <View style={{ marginBottom: 10 }}>
+              <Text style={styles.fieldLabel}>Rol del sistema</Text>
+              <Sel
+                value={role as string}
+                onValueChange={(v: string) => setRole(v as User['role'])}
+                items={Object.entries(ROLES).map(([k, v]) => ({ label: v.label, value: k }))}
+              />
+            </View>
+            <View style={styles.hintBox}>
+              <Text style={styles.hintText}>
+                <Text style={{ fontWeight: '700' }}>Permisos del rol {ROLES[role as string]?.label}:</Text> {ROLES[role as string]?.perms.join(', ')}
+              </Text>
             </View>
             <View style={styles.modalActions}>
-              <TouchableOpacity style={styles.cancelBtn} onPress={() => setModal(false)}>
-                <Text style={{ color: colors.textMuted }}>Cancelar</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[styles.saveBtn, saving && { opacity: 0.6 }]} onPress={save} disabled={saving}>
-                <Text style={{ color: '#fff', fontWeight: '700' }}>{saving ? 'Guardando...' : 'Guardar'}</Text>
-              </TouchableOpacity>
+              <Btn variant="secondary" label="Cancelar" onPress={() => setModal(false)} />
+              <Btn label={saving ? 'Guardando...' : editTarget ? 'Actualizar' : 'Crear Usuario'} onPress={save} disabled={saving} />
             </View>
           </View>
         </View>
@@ -192,9 +194,7 @@ export default function UsuariosScreen() {
               <Text style={styles.linkBox} selectable>{linkInfo.link}</Text>
             ) : null}
             <View style={styles.modalActions}>
-              <TouchableOpacity style={styles.saveBtn} onPress={() => setLinkInfo(null)}>
-                <Text style={{ color: '#fff', fontWeight: '700' }}>Entendido</Text>
-              </TouchableOpacity>
+              <Btn variant="secondary" label="Cerrar" onPress={() => setLinkInfo(null)} />
             </View>
           </View>
         </View>
@@ -205,27 +205,20 @@ export default function UsuariosScreen() {
 
 const createStyles = () => StyleSheet.create({
   wrap: { flex: 1, backgroundColor: colors.bg, padding: 16 },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12, gap: 12 },
   title: { fontSize: 22, fontWeight: '800', color: colors.text },
-  addBtn: { backgroundColor: colors.primary, paddingVertical: 8, paddingHorizontal: 14, borderRadius: 8 },
-  addBtnText: { color: '#fff', fontWeight: '700', fontSize: 13 },
+  subtitle: { fontSize: 14, color: colors.textMuted, marginTop: 2 },
   row: { flexDirection: 'row', backgroundColor: colors.bgCard, borderRadius: 14, borderWidth: 1, borderColor: colors.border, padding: 12, marginBottom: 8, alignItems: 'center' },
   name: { fontWeight: '700', fontSize: 14, color: colors.text },
   email: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
-  resendLink: { color: colors.primary, fontSize: 12, fontWeight: '600' },
-  deactivateLink: { color: colors.danger, fontSize: 12, fontWeight: '600' },
-  modalBg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 24 },
+  modalBg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'center', padding: 24 },
   modalCard: { backgroundColor: colors.bgCard, borderRadius: 14, padding: 20 },
-  modalTitle: { fontWeight: '700', fontSize: 16, marginBottom: 8, color: colors.text },
+  modalTitle: { fontWeight: '700', fontSize: 17, marginBottom: 8, color: colors.text },
   hint: { fontSize: 12, color: colors.textMuted, marginBottom: 10 },
-  input: { borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 10, fontSize: 14, marginBottom: 10, color: colors.text, backgroundColor: colors.bg },
-  chipsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 10 },
-  chip: { borderWidth: 1, borderColor: colors.border, borderRadius: 20, paddingVertical: 6, paddingHorizontal: 12 },
-  chipText: { fontSize: 12, color: colors.text },
-  chipTextActive: { color: '#fff' },
-  modalActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 6 },
-  cancelBtn: { paddingVertical: 10, paddingHorizontal: 16 },
-  saveBtn: { backgroundColor: colors.primary, paddingVertical: 10, paddingHorizontal: 18, borderRadius: 8 },
+  hintBox: { backgroundColor: colors.inputBg, borderRadius: 12, padding: 12, marginBottom: 10 },
+  hintText: { fontSize: 12, color: colors.text },
+  fieldLabel: { fontSize: 12, fontWeight: '600', color: colors.textMuted, textTransform: 'uppercase', marginBottom: 4 },
+  modalActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 8 },
   linkBox: { fontSize: 12, color: colors.primary, backgroundColor: colors.primaryTint, borderRadius: 8, padding: 10, marginBottom: 8 },
 });
 

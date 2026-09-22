@@ -197,7 +197,7 @@ export default function LoginScreen() {
 
 const styles = StyleSheet.create({
   bg: { flex: 1, backgroundColor: NAVY },
-  veil: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(11,18,32,0.72)' },
+  veil: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(11,18,32,0.72)' },
   safe: { flex: 1 },
   scroll: { flexGrow: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
   logoWrap: { alignItems: 'center', marginBottom: 28 },

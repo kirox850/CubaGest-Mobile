@@ -8,8 +8,9 @@ import { useFocusEffect } from '@react-navigation/native';
 import { ProductsAPI, LocationsAPI } from '../api/endpoints';
 import { useAuth } from '../context/AuthContext';
 import { colors, themeRef } from '../config/theme';
-import { CAN_MANAGE_INVENTORY } from '../config/roles';
-import { Badge, EmptyState, ErrorBanner } from '../components/UI';
+import { CAN_MANAGE_INVENTORY, CATEGORIES } from '../config/roles';
+import { Badge, EmptyState, ErrorBanner, Btn, Inp, Sel } from '../components/UI';
+import Icon from '../components/Icon';
 import { shareCSV } from '../utils/csv';
 import { cacheProducts } from '../offline/offlineStore';
 import type { Location, LocationStockItem, Product } from '../types';
@@ -36,6 +37,7 @@ export default function InventarioScreen() {
   const [selectedLocId, setSelectedLocId] = useState<string>('');
   const [products, setProducts] = useState<LocationStockItem[]>([]);
   const [search, setSearch] = useState('');
+  const [filterCat, setFilterCat] = useState('Todas');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
 
@@ -99,9 +101,12 @@ export default function InventarioScreen() {
 
   const filtered = products.filter(
     (p) =>
-      p.name.toLowerCase().includes(search.toLowerCase()) ||
-      p.code.toLowerCase().includes(search.toLowerCase()),
+      (filterCat === 'Todas' || p.category === filterCat) &&
+      (p.name.toLowerCase().includes(search.toLowerCase()) ||
+        p.code.toLowerCase().includes(search.toLowerCase()) ||
+        String((p as any).barcode || '').toLowerCase().includes(search.toLowerCase())),
   );
+  const cats = ['Todas', ...Array.from(new Set(products.map((p) => p.category).filter(Boolean)))];
 
   const openAdjust = (p: LocationStockItem) => {
     setSelected(p);
@@ -193,10 +198,20 @@ export default function InventarioScreen() {
     }
   };
 
+  const reactivateProduct = async (id: string) => {
+    try {
+      // El backend expone POST /products/:id/reactivate
+      await ProductsAPI.reactivate(id);
+      load();
+    } catch (err) {
+      Alert.alert('Error', (err as Error).message);
+    }
+  };
+
   const confirmDelete = (p: Product) => {
     Alert.alert(
       'Desactivar producto',
-      `Desea desactivar "${p.name}"? No se eliminara, solo se ocultara del inventario activo.`,
+      `¿Desactivar "${p.name}"? No se eliminará, solo se ocultará del inventario.`,
       [
         { text: 'Cancelar', style: 'cancel' },
         {
@@ -224,24 +239,22 @@ export default function InventarioScreen() {
 
   return (
     <View style={styles.wrap}>
+      {/* Header — igual que la web: título 22/800 + contador + botones */}
       <View style={styles.header}>
-        <Text style={styles.title}>Inventario</Text>
-        <View style={{ flexDirection: 'row', gap: 8 }}>
-          <TouchableOpacity
-            style={[styles.addBtn, { backgroundColor: colors.bgSecondary }]}
-            onPress={() => shareCSV('inventario', products as any, [
-              { key: 'code', label: 'Código' }, { key: 'name', label: 'Producto' }, { key: 'category', label: 'Categoría' },
-              { key: 'unit', label: 'Unidad' }, { key: 'price', label: 'Precio' }, { key: 'currency', label: 'Moneda' },
-              { key: 'stock', label: 'Stock' }, { key: 'minStock', label: 'Mínimo' },
-            ])}
-          >
-            <Text style={[styles.addBtnText, { color: colors.textSecondary }]}>CSV</Text>
-          </TouchableOpacity>
-          {canManage && (
-            <TouchableOpacity style={styles.addBtn} onPress={openCreate}>
-              <Text style={styles.addBtnText}>+ Nuevo</Text>
-            </TouchableOpacity>
-          )}
+        <View style={{ flexShrink: 1 }}>
+          <Text style={styles.title}>Inventario</Text>
+          <Text style={styles.subtitle}>
+            {products.filter((p: any) => p.active !== false).length} productos
+          </Text>
+        </View>
+        <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+          <Btn variant="secondary" icon="refresh" label="Actualizar" onPress={load} />
+          <Btn variant="secondary" icon="doc" label="CSV" onPress={() => shareCSV('inventario', products as any, [
+            { key: 'code', label: 'Código' }, { key: 'name', label: 'Producto' }, { key: 'category', label: 'Categoría' },
+            { key: 'unit', label: 'Unidad' }, { key: 'price', label: 'Precio' }, { key: 'currency', label: 'Moneda' },
+            { key: 'stock', label: 'Stock' }, { key: 'minStock', label: 'Mínimo' },
+          ])} />
+          {canManage && <Btn icon="plus" label="Nuevo Producto" onPress={openCreate} />}
         </View>
       </View>
 
@@ -267,13 +280,26 @@ export default function InventarioScreen() {
 
       <ErrorBanner message={error} />
 
-      <TextInput
-        style={styles.search}
-        placeholder="Buscar por nombre o codigo..."
-        placeholderTextColor={colors.textMuted}
-        value={search}
-        onChangeText={setSearch}
-      />
+      {/* Buscador con icono + filtro de categoría (igual que la web) */}
+      <View style={{ flexDirection: 'row', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
+        <View style={{ flex: 1, minWidth: 200, justifyContent: 'center' }}>
+          <View style={{ position: 'absolute', left: 10, zIndex: 1 }}>
+            <Icon name="search" size={15} color={colors.textMuted} />
+          </View>
+          <Inp
+            style={{ paddingLeft: 34 }}
+            placeholder="Buscar por nombre, código o código de barras..."
+            value={search}
+            onChangeText={setSearch}
+          />
+        </View>
+        <Sel
+          style={{ width: 150 }}
+          value={filterCat}
+          onValueChange={setFilterCat}
+          items={cats.map((c) => ({ label: c, value: c }))}
+        />
+      </View>
 
       <FlatList
         data={filtered}
@@ -282,37 +308,32 @@ export default function InventarioScreen() {
         ListEmptyComponent={<EmptyState text={loading ? 'Cargando...' : 'No hay productos'} />}
         renderItem={({ item }) => {
           const low = Number(item.stock) <= Number(item.minStock);
+          const p = item as any;
           return (
-            <TouchableOpacity
-              style={styles.row}
-              onPress={() => canManage && openAdjust(item)}
-              onLongPress={() => canManage && openEdit(item)}
-            >
-              <View style={{ flex: 1 }}>
-                <Text style={styles.name}>{item.name}</Text>
-                <Text style={styles.code}>
-                  {item.code} · {item.category}
+            <View style={[styles.row, { opacity: p.active === false ? 0.5 : 1 }]}>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={styles.name}>
+                  {item.name} <Text style={styles.unit}>/{item.unit}</Text>
+                </Text>
+                <Text style={styles.code}>{item.code} · {item.category}</Text>
+                <Text style={styles.price}>
+                  {(p.currency === 'EUR' ? '€' : '$')}{Number(item.price).toFixed(2)}
+                  <Text style={styles.unit}> {(p.currency || 'CUP')}</Text>
+                  {'  '}Stock: <Text style={{ color: low ? '#F97316' : '#10B981', fontWeight: '700' }}>{item.stock}</Text>
+                  {low ? ' ⚠ BAJO' : ''}
                 </Text>
                 {canManage && (
-                  <Text style={styles.hint}>Toca para ajustar stock · Mantén para editar</Text>
+                  <View style={{ flexDirection: 'row', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
+                    <Btn variant="ghost" label="± Ajustar" onPress={() => openAdjust(item)} style={{ paddingVertical: 4, paddingHorizontal: 8 }} />
+                    <Btn variant="ghost" label="Editar" onPress={() => openEdit(item as any)} style={{ paddingVertical: 4, paddingHorizontal: 8 }} />
+                    {p.active !== false
+                      ? <Btn variant="danger" label="Desactivar" onPress={() => confirmDelete(item as any)} style={{ paddingVertical: 4, paddingHorizontal: 8 }} />
+                      : <Btn variant="secondary" label="Activar" onPress={() => reactivateProduct(item.id)} style={{ paddingVertical: 4, paddingHorizontal: 8 }} />}
+                  </View>
                 )}
               </View>
-              <View style={{ alignItems: 'flex-end' }}>
-                <Text style={styles.price}>${Number(item.price).toFixed(2)}</Text>
-                <Badge
-                  label={`${item.stock} ${item.unit}`}
-                  color={low ? '#F97316' : '#10B981'}
-                />
-                {canManage && (
-                  <TouchableOpacity
-                    onPress={() => confirmDelete(item)}
-                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                  >
-                    <Text style={styles.deleteLink}>Desactivar</Text>
-                  </TouchableOpacity>
-                )}
-              </View>
-            </TouchableOpacity>
+              <Badge label={p.active !== false ? 'Activo' : 'Inactivo'} color={p.active !== false ? '#10B981' : '#888'} />
+            </View>
           );
         }}
       />
@@ -531,6 +552,8 @@ const createStyles = () => StyleSheet.create({
   },
   name: { fontWeight: '700', fontSize: 14, color: colors.text },
   code: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
+  unit: { fontSize: 11, color: colors.textMuted, fontWeight: '400' },
+  subtitle: { fontSize: 14, color: colors.textMuted, marginTop: 2 },
   hint: { fontSize: 10, color: colors.textMuted, marginTop: 2 },
   price: { fontWeight: '700', color: colors.text, marginBottom: 4 },
   deleteLink: { fontSize: 11, color: colors.danger, marginTop: 6 },

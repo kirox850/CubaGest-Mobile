@@ -176,7 +176,7 @@ export default function TransferenciasScreen() {
   return (
     <View style={styles.wrap}>
       <View style={styles.headerRow}>
-        <Text style={styles.title}>Envíos</Text>
+        <Text style={styles.title}>Envíos entre ubicaciones</Text>
         <TouchableOpacity style={styles.addBtn} onPress={openNew}>
           <Text style={styles.addBtnText}>+ Nuevo</Text>
         </TouchableOpacity>

@@ -62,7 +62,9 @@ export const LocationsAPI = {
 
 export const DashboardAPI = {
   summary: (): Promise<DashboardSummary> => apiFetch('/dashboard/summary'),
-  analytics: (): Promise<any> => apiFetch('/dashboard/analytics'),
+  // ?days=N — la web pide 7/30/90/180 según el rango del gráfico.
+  analytics: (days?: string): Promise<any> =>
+    apiFetch(`/dashboard/analytics${days ? `?days=${days}` : ''}`),
 };
 
 // ─── Config de empresa: monedas y tasa de cambio (Fase 4) ─────────────────

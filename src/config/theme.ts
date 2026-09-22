@@ -32,14 +32,18 @@ const light = {
   bgCard: '#ffffff',
   bgSecondary: '#F1F5F9',
 
-  // Bordes
-  border: '#E2E8F0',
+  // Bordes (—line web)
+  border: '#E8E0D8',
   borderLight: '#F1F5F9',
+
+  // Inputs (—input-bg / —input-border web)
+  inputBg: '#F1F5F9',
+  inputBorder: '#D8CFC4',
 
   // Textos
   text: '#1E293B',
   textSecondary: '#475569',
-  textMuted: '#94A3B8',
+  textMuted: '#64748B',
 
   // Acento — Verde (acciones clave: Cobrar, confirmaciones)
   success: '#10B981',
@@ -75,9 +79,13 @@ const dark = {
   bgCard: '#101A2C',
   bgSecondary: '#1E293B',
 
-  // Bordes
+  // Bordes (—line web dark)
   border: '#26334A',
   borderLight: '#1B2537',
+
+  // Inputs (—input-bg / —input-border web dark)
+  inputBg: '#1E293B',
+  inputBorder: '#334155',
 
   // Textos
   text: '#E2E8F0',

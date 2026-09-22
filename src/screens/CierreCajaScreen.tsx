@@ -7,7 +7,8 @@ import { useFocusEffect } from '@react-navigation/native';
 import { ClosingAPI, LocationsAPI } from '../api/endpoints';
 import { useAuth } from '../context/AuthContext';
 import { colors, themeRef } from '../config/theme';
-import { Badge, EmptyState, ErrorBanner, Spinner } from '../components/UI';
+import { Badge, EmptyState, ErrorBanner, Spinner, Btn, PageHeader } from '../components/UI';
+import Icon from '../components/Icon';
 import type { Closing, ClosingItem, ClosingPreview, InventoryReading, Location } from '../types';
 
 const fmt = (n: number) => new Intl.NumberFormat('es-CU', { minimumFractionDigits: 2 }).format(n || 0);
@@ -124,23 +125,16 @@ export default function CierreCajaScreen() {
   if (view === 'list') {
     return (
       <View style={styles.wrap}>
+        {/* Header — igual que la web: título + botones */}
         <View style={styles.header}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.title}>Cierre de Caja</Text>
-            <Text style={styles.subtitle}>Conciliación de ventas, stock e ingresos</Text>
+          <PageHeader title="Cierre de Caja" subtitle="Conciliación de ventas, stock e ingresos" />
+          <View style={{ flexDirection: 'row', gap: 10, flexWrap: 'wrap' }}>
+            {isAdmin && (
+              <Btn variant="secondary" icon="refresh" label="Lectura de apertura" onPress={() => setConfirmReading(true)} />
+            )}
+            <Btn icon="check" label="Iniciar cierre" onPress={startClosing} />
           </View>
         </View>
-        {isAdmin && (
-          <TouchableOpacity style={styles.secondaryBtn} onPress={() => setConfirmReading(true)}>
-            <Text style={styles.secondaryBtnText}>📸 Lectura de apertura</Text>
-          </TouchableOpacity>
-        )}
-        <TouchableOpacity
-          style={styles.primaryBtn}
-          onPress={startClosing}
-        >
-          <Text style={styles.primaryBtnText}>✓ Iniciar cierre</Text>
-        </TouchableOpacity>
 
         <ErrorBanner message={error} />
 
@@ -452,8 +446,8 @@ export default function CierreCajaScreen() {
 }
 
 const createStyles = () => StyleSheet.create({
-  wrap: { flex: 1, backgroundColor: colors.bg, padding: 12 },
-  header: { marginBottom: 8 },
+  wrap: { flex: 1, backgroundColor: colors.bg, padding: 16 },
+  header: { gap: 12, marginBottom: 12 },
   title: { fontSize: 20, fontWeight: '800', color: colors.text },
   subtitle: { fontSize: 12, color: colors.textMuted, marginTop: 2, marginBottom: 10 },
   primaryBtn: { backgroundColor: colors.primary, borderRadius: 12, paddingVertical: 12, alignItems: 'center', marginBottom: 8 },
