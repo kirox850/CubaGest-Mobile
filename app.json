@@ -1,11 +1,51 @@
 {
-  "name": "CubaGest",
-  "displayName": "CubaGest",
   "expo": {
     "name": "CubaGest",
     "slug": "cubagest",
-    "version": "1.2.0",
+    "version": "1.3.0",
     "orientation": "portrait",
-    "userInterfaceStyle": "light"
+    "userInterfaceStyle": "automatic",
+    "icon": "./assets/images/icon.png",
+    "backgroundColor": "#0B1220",
+    "assetBundlePatterns": [
+      "assets/images/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.cubagest.app",
+      "buildNumber": "1",
+      "infoPlist": {
+        "UIUserInterfaceStyle": "Automatic"
+      },
+      "config": {}
+    },
+    "android": {
+      "package": "com.cubagest.app",
+      "versionCode": 3,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/icon.png",
+        "backgroundColor": "#FFFFFF"
+      },
+      "allowBackup": false
+    },
+    "androidStatusBar": {
+      "barStyle": "light-content",
+      "backgroundColor": "#0B1220",
+      "translucent": false
+    },
+    "extra": {
+      "brandColor": "#048afb"
+    },
+    "plugins": [
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/images/icon.png",
+          "imageWidth": 200,
+          "resizeMode": "contain",
+          "backgroundColor": "#0B1220"
+        }
+      ]
+    ]
   }
 }

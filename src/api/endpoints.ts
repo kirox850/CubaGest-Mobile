@@ -18,7 +18,7 @@ export const AuthAPI = {
     const res = await apiFetch<any>('/auth/me');
     return (res?.user ?? res) as User;
   },
-  register: (data: { companyName: string; companyNit?: string; name: string; email: string; password: string }): Promise<AuthResponse> =>
+  register: (data: { companyName: string; companyNit?: string; name: string; email: string; password: string; referralCode?: string }): Promise<AuthResponse> =>
     apiFetch('/auth/register', { method: 'POST', body: data, auth: false }),
   forgotPassword: (email: string): Promise<{ message: string }> =>
     apiFetch('/auth/forgot-password', { method: 'POST', body: { email }, auth: false }),
@@ -62,7 +62,9 @@ export const LocationsAPI = {
 
 export const DashboardAPI = {
   summary: (): Promise<DashboardSummary> => apiFetch('/dashboard/summary'),
-  analytics: (): Promise<any> => apiFetch('/dashboard/analytics'),
+  // ?days=N — la web pide 7/30/90/180 según el rango del gráfico.
+  analytics: (days?: string): Promise<any> =>
+    apiFetch(`/dashboard/analytics${days ? `?days=${days}` : ''}`),
 };
 
 // ─── Config de empresa: monedas y tasa de cambio (Fase 4) ─────────────────

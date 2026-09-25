@@ -5,12 +5,12 @@
 export const ROLES: Record<string, { label: string; color: string; perms: string[] }> = {
   admin: {
     label: 'Administrador',
-    color: '#3B82F6',
+    color: '#048afb',
     perms: ['dashboard', 'inventario', 'facturacion', 'contabilidad', 'cierre', 'usuarios', 'config', 'transferencias', 'auditoria', 'monedas'],
   },
   cajero: {
     label: 'Cajero',
-    color: '#3B82F6',
+    color: '#048afb',
     perms: ['dashboard', 'pos', 'facturacion', 'cierre', 'transferencias', 'auditoria'],
   },
   contador: {
@@ -25,17 +25,23 @@ export const ROLES: Record<string, { label: string; color: string; perms: string
   },
 };
 
+// Labels idénticos a los de la web (constants.ts)
 export const PAY_METHODS = [
   { id: 'efectivo', label: 'Efectivo' },
   { id: 'transferencia', label: 'Transferencia' },
-  { id: 'usd', label: 'USD' },
+  { id: 'usd', label: 'USD (efectivo)' },
   { id: 'clasica', label: 'Clásica' },
   { id: 'zelle', label: 'Zelle' },
   { id: 'mlc', label: 'MLC' },
-  { id: 'eur', label: 'EUR' },
+  { id: 'eur', label: 'EUR (efectivo)' },
 ];
 
 export const CURRENCIES = ['CUP', 'USD', 'EUR', 'MLC'];
 export const CURRENCY_SYMBOLS: Record<string, string> = { CUP: '$', USD: '$', EUR: '€', MLC: 'MLC' };
+
+// Categorías y unidades — mismas listas que la web
+export const CATEGORIES = ['Alimentos', 'Higiene', 'Bebidas', 'Limpieza', 'Electrónica', 'Ropa', 'Otros'];
+export const UNITS = ['ud', 'kg', 'g', 'L', 'ml', 'paq', 'lata', 'caja', 'docena'];
+export const EXPENSE_CATS = ['Compras', 'Nómina', 'Servicios', 'Operaciones', 'Impuestos', 'Otros'];
 
 export const CAN_MANAGE_INVENTORY = ['admin', 'almacenista'];

@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import { AuthAPI } from '../api/endpoints';
-import { colors } from '../config/theme';
+import { colors, NAVY } from '../config/theme';
 import { ErrorBanner } from '../components/UI';
 
 export default function RegisterScreen({ onBackToLogin }: { onBackToLogin: () => void }) {
@@ -12,6 +12,9 @@ export default function RegisterScreen({ onBackToLogin }: { onBackToLogin: () =>
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  // Programa de referidos: si un usuario te invitó, su código le suma un plan
+  // de regalo cuando contrates (paridad con la web).
+  const [referralCode, setReferralCode] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -35,6 +38,7 @@ export default function RegisterScreen({ onBackToLogin }: { onBackToLogin: () =>
         name,
         email,
         password,
+        referralCode: referralCode.trim().toUpperCase() || undefined,
       });
       // Entrar directamente con la cuenta recién creada.
       await login(email, password);
@@ -69,6 +73,16 @@ export default function RegisterScreen({ onBackToLogin }: { onBackToLogin: () =>
           <Text style={styles.label}>Contrasena</Text>
           <TextInput style={styles.input} value={password} onChangeText={setPassword} placeholder="Minimo 6 caracteres" secureTextEntry />
 
+          <Text style={styles.label}>Código de referido (opcional)</Text>
+          <TextInput
+            style={styles.input}
+            value={referralCode}
+            onChangeText={(v) => setReferralCode(v.toUpperCase())}
+            placeholder="Si un amigo te invitó, pon su código"
+            autoCapitalize="characters"
+            maxLength={10}
+          />
+
           <TouchableOpacity style={styles.button} onPress={handleRegister} disabled={loading}>
             {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Crear negocio</Text>}
           </TouchableOpacity>
@@ -83,11 +97,11 @@ export default function RegisterScreen({ onBackToLogin }: { onBackToLogin: () =>
 }
 
 const styles = StyleSheet.create({
-  wrap: { flex: 1, backgroundColor: colors.primaryDark },
+  wrap: { flex: 1, backgroundColor: NAVY },
   scroll: { flexGrow: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
   title: { color: '#fff', fontSize: 24, fontWeight: '800', marginBottom: 4, textAlign: 'center' },
   subtitle: { color: 'rgba(255,255,255,0.65)', fontSize: 13, marginBottom: 22, textAlign: 'center', maxWidth: 320 },
-  form: { width: '100%', maxWidth: 380, backgroundColor: '#fff', borderRadius: 16, padding: 24 },
+  form: { width: '100%', maxWidth: 380, backgroundColor: colors.bgCard, borderRadius: 16, padding: 24 },
   label: { fontSize: 12, fontWeight: '600', color: colors.textMuted, textTransform: 'uppercase', marginBottom: 6, marginTop: 14 },
   input: { borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15, backgroundColor: colors.bg },
   button: { backgroundColor: colors.primary, borderRadius: 8, paddingVertical: 13, alignItems: 'center', marginTop: 22 },

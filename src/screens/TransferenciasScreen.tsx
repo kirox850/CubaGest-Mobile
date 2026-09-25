@@ -6,7 +6,7 @@ import {
 import { useFocusEffect } from '@react-navigation/native';
 import { TransfersAPI, LocationsAPI, ProductsAPI } from '../api/endpoints';
 import { useAuth } from '../context/AuthContext';
-import { colors } from '../config/theme';
+import { colors, themeRef } from '../config/theme';
 import { Badge, EmptyState, ErrorBanner } from '../components/UI';
 import type { Location, LocationStockItem, Transfer } from '../types';
 
@@ -16,9 +16,9 @@ const fmtDate = (d: string) =>
 
 const STATUS_BADGE: Record<string, { label: string; color: string }> = {
   pendiente: { label: 'Pendiente', color: '#F97316' },
-  aprobado: { label: 'Aprobado', color: '#10B981' },
-  rechazado: { label: 'Rechazado', color: '#EF4444' },
-  cancelado: { label: 'Cancelado', color: '#94A3B8' },
+  aprobado: { label: 'Aprobado', color: colors.success },
+  rechazado: { label: 'Rechazado', color: colors.danger },
+  cancelado: { label: 'Cancelado', color: colors.textMuted },
 };
 
 export default function TransferenciasScreen() {
@@ -176,7 +176,7 @@ export default function TransferenciasScreen() {
   return (
     <View style={styles.wrap}>
       <View style={styles.headerRow}>
-        <Text style={styles.title}>Envíos</Text>
+        <Text style={styles.title}>Envíos entre ubicaciones</Text>
         <TouchableOpacity style={styles.addBtn} onPress={openNew}>
           <Text style={styles.addBtnText}>+ Nuevo</Text>
         </TouchableOpacity>
@@ -200,7 +200,7 @@ export default function TransferenciasScreen() {
           <EmptyState icon="🚚" text={tab === 'pendientes' ? 'No hay envíos pendientes' : 'No hay envíos registrados todavía'} />
         }
         renderItem={({ item: t }) => {
-          const st = STATUS_BADGE[t.status] || { label: t.status, color: '#94A3B8' };
+          const st = STATUS_BADGE[t.status] || { label: t.status, color: colors.textMuted };
           // Mostramos las acciones siempre en pendientes: el backend valida
           // de verdad quién puede aprobar (dueño del destino) y responde 403.
           const canApprove = t.status === 'pendiente';
@@ -295,7 +295,7 @@ export default function TransferenciasScreen() {
               <View key={i.productId} style={styles.selItemRow}>
                 <Text style={styles.selItemText}>{i.qty}x {i.name}</Text>
                 <TouchableOpacity onPress={() => setSelItems((prev) => prev.filter((x) => x.productId !== i.productId))}>
-                  <Text style={{ color: '#EF4444', fontWeight: '700' }}>✕</Text>
+                  <Text style={{ color: colors.danger, fontWeight: '700' }}>✕</Text>
                 </TouchableOpacity>
               </View>
             ))}
@@ -348,42 +348,56 @@ export default function TransferenciasScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  wrap: { flex: 1, backgroundColor: '#F8FAFC', padding: 12 },
+const createStyles = () => StyleSheet.create({
+  wrap: { flex: 1, backgroundColor: colors.bg, padding: 12 },
   headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
-  title: { fontSize: 22, fontWeight: '800', color: '#1E293B' },
-  addBtn: { backgroundColor: '#3B82F6', paddingVertical: 8, paddingHorizontal: 14, borderRadius: 8 },
+  title: { fontSize: 22, fontWeight: '800', color: colors.text },
+  addBtn: { backgroundColor: colors.primary, paddingVertical: 8, paddingHorizontal: 14, borderRadius: 8 },
   addBtnText: { color: '#fff', fontWeight: '700', fontSize: 13 },
-  tabRow: { flexDirection: 'row', backgroundColor: '#F1F5F9', borderRadius: 14, padding: 4, marginBottom: 10 },
+  tabRow: { flexDirection: 'row', backgroundColor: colors.bgSecondary, borderRadius: 14, padding: 4, marginBottom: 10 },
   tabBtn: { flex: 1, paddingVertical: 8, alignItems: 'center', borderRadius: 10 },
-  tabBtnActive: { backgroundColor: '#3B82F6' },
+  tabBtnActive: { backgroundColor: colors.primary },
   tabText: { fontSize: 13, fontWeight: '600', color: colors.textMuted },
   tabTextActive: { color: '#fff' },
-  card: { backgroundColor: '#fff', borderRadius: 14, borderWidth: 1, borderColor: '#E2E8F0', padding: 12, marginBottom: 10 },
+  card: { backgroundColor: colors.bgCard, borderRadius: 14, borderWidth: 1, borderColor: colors.border, padding: 12, marginBottom: 10 },
   cardTop: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
-  route: { fontWeight: '700', fontSize: 14, color: '#1E293B' },
+  route: { fontWeight: '700', fontSize: 14, color: colors.text },
   cardSub: { fontSize: 11, color: colors.textMuted, marginTop: 2 },
-  itemLine: { fontSize: 12, color: '#475569', marginTop: 2 },
+  itemLine: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
   actionsRow: { flexDirection: 'row', gap: 8, marginTop: 10 },
-  btnApprove: { backgroundColor: '#10B981', paddingVertical: 8, paddingHorizontal: 14, borderRadius: 8, flex: 1, alignItems: 'center' },
+  btnApprove: { backgroundColor: colors.success, paddingVertical: 8, paddingHorizontal: 14, borderRadius: 8, flex: 1, alignItems: 'center' },
   btnApproveText: { color: '#fff', fontWeight: '700', fontSize: 12 },
   btnReject: { backgroundColor: '#FEF2F2', borderWidth: 1, borderColor: '#FECACA', paddingVertical: 8, paddingHorizontal: 14, borderRadius: 8, flex: 1, alignItems: 'center' },
-  btnRejectText: { color: '#EF4444', fontWeight: '700', fontSize: 12 },
+  btnRejectText: { color: colors.danger, fontWeight: '700', fontSize: 12 },
   btnCancel: { paddingVertical: 10, paddingHorizontal: 14 },
   btnCancelText: { color: colors.textMuted, fontWeight: '600', fontSize: 12 },
   modalBg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 20 },
-  modalCard: { backgroundColor: '#fff', borderRadius: 14, padding: 20 },
-  modalTitle: { fontWeight: '800', fontSize: 16, marginBottom: 8, color: '#1E293B' },
+  modalCard: { backgroundColor: colors.bgCard, borderRadius: 14, padding: 20 },
+  modalTitle: { fontWeight: '800', fontSize: 16, marginBottom: 8, color: colors.text },
   hint: { fontSize: 11, color: colors.textMuted, marginBottom: 12 },
   fieldLabel: { fontSize: 11, fontWeight: '700', color: colors.textMuted, textTransform: 'uppercase', marginBottom: 6 },
-  chip: { borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 20, paddingHorizontal: 12, paddingVertical: 6, backgroundColor: '#fff' },
-  chipActive: { backgroundColor: '#3B82F6', borderColor: '#3B82F6' },
-  chipText: { fontSize: 12, fontWeight: '600', color: '#1E293B' },
-  productOption: { paddingVertical: 8, paddingHorizontal: 10, borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 8, marginBottom: 4, backgroundColor: '#fff' },
-  productOptionActive: { backgroundColor: '#EFF6FF', borderColor: '#3B82F6' },
-  productOptionText: { fontSize: 12, color: '#1E293B' },
-  input: { borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8, fontSize: 13, backgroundColor: '#F8FAFC', color: '#1E293B' },
+  chip: { borderWidth: 1, borderColor: colors.border, borderRadius: 20, paddingHorizontal: 12, paddingVertical: 6, backgroundColor: colors.bgCard },
+  chipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  chipText: { fontSize: 12, fontWeight: '600', color: colors.text },
+  productOption: { paddingVertical: 8, paddingHorizontal: 10, borderWidth: 1, borderColor: colors.border, borderRadius: 8, marginBottom: 4, backgroundColor: colors.bgCard },
+  productOptionActive: { backgroundColor: colors.primaryTint, borderColor: colors.primary },
+  productOptionText: { fontSize: 12, color: colors.text },
+  input: { borderWidth: 1, borderColor: colors.border, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8, fontSize: 13, backgroundColor: colors.bg, color: colors.text },
   selItemRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 4 },
-  selItemText: { fontSize: 12, color: '#1E293B', fontWeight: '600' },
+  selItemText: { fontSize: 12, color: colors.text, fontWeight: '600' },
   modalActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 8, marginTop: 14, alignItems: 'center' },
 });
+
+// Estilos VIVOS: se reconstruyen cuando cambia el tema (dark mode).
+let __stylesVersion = -1;
+let __styles: ReturnType<typeof createStyles> | null = null;
+export const styles = new Proxy({} as ReturnType<typeof createStyles>, {
+  get(_t, prop) {
+    if (__stylesVersion !== themeRef.version || !__styles) {
+      __styles = createStyles();
+      __stylesVersion = themeRef.version;
+    }
+    return __styles[prop as keyof ReturnType<typeof createStyles>];
+  },
+});
+

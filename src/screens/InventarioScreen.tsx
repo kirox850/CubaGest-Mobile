@@ -7,9 +7,10 @@ import {
 import { useFocusEffect } from '@react-navigation/native';
 import { ProductsAPI, LocationsAPI } from '../api/endpoints';
 import { useAuth } from '../context/AuthContext';
-import { colors } from '../config/theme';
-import { CAN_MANAGE_INVENTORY } from '../config/roles';
-import { Badge, EmptyState, ErrorBanner } from '../components/UI';
+import { colors, themeRef } from '../config/theme';
+import { CAN_MANAGE_INVENTORY, CATEGORIES } from '../config/roles';
+import { Badge, EmptyState, ErrorBanner, Btn, Inp, Sel } from '../components/UI';
+import Icon from '../components/Icon';
 import { shareCSV } from '../utils/csv';
 import { cacheProducts } from '../offline/offlineStore';
 import type { Location, LocationStockItem, Product } from '../types';
@@ -36,6 +37,7 @@ export default function InventarioScreen() {
   const [selectedLocId, setSelectedLocId] = useState<string>('');
   const [products, setProducts] = useState<LocationStockItem[]>([]);
   const [search, setSearch] = useState('');
+  const [filterCat, setFilterCat] = useState('Todas');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
 
@@ -99,9 +101,12 @@ export default function InventarioScreen() {
 
   const filtered = products.filter(
     (p) =>
-      p.name.toLowerCase().includes(search.toLowerCase()) ||
-      p.code.toLowerCase().includes(search.toLowerCase()),
+      (filterCat === 'Todas' || p.category === filterCat) &&
+      (p.name.toLowerCase().includes(search.toLowerCase()) ||
+        p.code.toLowerCase().includes(search.toLowerCase()) ||
+        String((p as any).barcode || '').toLowerCase().includes(search.toLowerCase())),
   );
+  const cats = ['Todas', ...Array.from(new Set(products.map((p) => p.category).filter(Boolean)))];
 
   const openAdjust = (p: LocationStockItem) => {
     setSelected(p);
@@ -193,10 +198,20 @@ export default function InventarioScreen() {
     }
   };
 
+  const reactivateProduct = async (id: string) => {
+    try {
+      // El backend expone POST /products/:id/reactivate
+      await ProductsAPI.reactivate(id);
+      load();
+    } catch (err) {
+      Alert.alert('Error', (err as Error).message);
+    }
+  };
+
   const confirmDelete = (p: Product) => {
     Alert.alert(
       'Desactivar producto',
-      `Desea desactivar "${p.name}"? No se eliminara, solo se ocultara del inventario activo.`,
+      `¿Desactivar "${p.name}"? No se eliminará, solo se ocultará del inventario.`,
       [
         { text: 'Cancelar', style: 'cancel' },
         {
@@ -224,42 +239,45 @@ export default function InventarioScreen() {
 
   return (
     <View style={styles.wrap}>
+      {/* Header — igual que la web: título 22/800 + contador + botones */}
       <View style={styles.header}>
-        <Text style={styles.title}>Inventario</Text>
-        <View style={{ flexDirection: 'row', gap: 8 }}>
-          <TouchableOpacity
-            style={[styles.addBtn, { backgroundColor: '#F1F5F9' }]}
-            onPress={() => shareCSV('inventario', products as any, [
-              { key: 'code', label: 'Código' }, { key: 'name', label: 'Producto' }, { key: 'category', label: 'Categoría' },
-              { key: 'unit', label: 'Unidad' }, { key: 'price', label: 'Precio' }, { key: 'currency', label: 'Moneda' },
-              { key: 'stock', label: 'Stock' }, { key: 'minStock', label: 'Mínimo' },
-            ])}
-          >
-            <Text style={[styles.addBtnText, { color: '#475569' }]}>CSV</Text>
-          </TouchableOpacity>
-          {canManage && (
-            <TouchableOpacity style={styles.addBtn} onPress={openCreate}>
-              <Text style={styles.addBtnText}>+ Nuevo</Text>
-            </TouchableOpacity>
-          )}
+        <View style={{ flexShrink: 1 }}>
+          <Text style={styles.title}>Inventario</Text>
+          <Text style={styles.subtitle}>
+            {products.filter((p: any) => p.active !== false).length} productos
+          </Text>
+        </View>
+        <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+          <Btn variant="secondary" icon="refresh" label="Actualizar" onPress={load} />
+          <Btn variant="secondary" icon="doc" label="CSV" onPress={() => shareCSV('inventario', products as any, [
+            { key: 'code', label: 'Código' }, { key: 'name', label: 'Producto' }, { key: 'category', label: 'Categoría' },
+            { key: 'unit', label: 'Unidad' }, { key: 'price', label: 'Precio' }, { key: 'currency', label: 'Moneda' },
+            { key: 'stock', label: 'Stock' }, { key: 'minStock', label: 'Mínimo' },
+          ])} />
+          {canManage && <Btn icon="plus" label="Nuevo Producto" onPress={openCreate} />}
         </View>
       </View>
 
-      {/* Selector de ubicación (solo admin; el resto ve su ubicación fija) */}
+      {/* Selector de ubicación (solo admin) — chips compactos con icono,
+          igual que los botones de ubicación de la web */}
       {isAdmin && locations.length > 1 ? (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
           <View style={styles.locRow}>
-            {locations.map((l) => (
-              <TouchableOpacity
-                key={l.id}
-                style={[styles.locChip, selectedLocId === l.id && styles.locChipActive]}
-                onPress={() => setSelectedLocId(l.id)}
-              >
-                <Text style={[styles.locChipText, selectedLocId === l.id && { color: '#fff' }]}>
-                  {l.name}
-                </Text>
-              </TouchableOpacity>
-            ))}
+            {locations.map((l) => {
+              const on = selectedLocId === l.id;
+              return (
+                <TouchableOpacity
+                  key={l.id}
+                  style={[styles.locChip, on && styles.locChipActive]}
+                  onPress={() => setSelectedLocId(l.id)}
+                >
+                  <Icon name={l.type === 'almacen' ? 'warehouse' : 'pos'} size={13} color={on ? '#ffffff' : colors.textSecondary} />
+                  <Text style={[styles.locChipText, on && { color: '#fff' }]} numberOfLines={1}>
+                    {l.name}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
           </View>
         </ScrollView>
       ) : null}
@@ -267,13 +285,26 @@ export default function InventarioScreen() {
 
       <ErrorBanner message={error} />
 
-      <TextInput
-        style={styles.search}
-        placeholder="Buscar por nombre o codigo..."
-        placeholderTextColor={colors.textMuted}
-        value={search}
-        onChangeText={setSearch}
-      />
+      {/* Buscador con icono + filtro de categoría (igual que la web) */}
+      <View style={{ flexDirection: 'row', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
+        <View style={{ flex: 1, minWidth: 200, justifyContent: 'center' }}>
+          <View style={{ position: 'absolute', left: 10, zIndex: 1 }}>
+            <Icon name="search" size={15} color={colors.textMuted} />
+          </View>
+          <Inp
+            style={{ paddingLeft: 34 }}
+            placeholder="Buscar por nombre, código o código de barras..."
+            value={search}
+            onChangeText={setSearch}
+          />
+        </View>
+        <Sel
+          style={{ width: 150 }}
+          value={filterCat}
+          onValueChange={setFilterCat}
+          items={cats.map((c) => ({ label: c, value: c }))}
+        />
+      </View>
 
       <FlatList
         data={filtered}
@@ -282,37 +313,32 @@ export default function InventarioScreen() {
         ListEmptyComponent={<EmptyState text={loading ? 'Cargando...' : 'No hay productos'} />}
         renderItem={({ item }) => {
           const low = Number(item.stock) <= Number(item.minStock);
+          const p = item as any;
           return (
-            <TouchableOpacity
-              style={styles.row}
-              onPress={() => canManage && openAdjust(item)}
-              onLongPress={() => canManage && openEdit(item)}
-            >
-              <View style={{ flex: 1 }}>
-                <Text style={styles.name}>{item.name}</Text>
-                <Text style={styles.code}>
-                  {item.code} · {item.category}
+            <View style={[styles.row, { opacity: p.active === false ? 0.5 : 1 }]}>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={styles.name}>
+                  {item.name} <Text style={styles.unit}>/{item.unit}</Text>
+                </Text>
+                <Text style={styles.code}>{item.code} · {item.category}</Text>
+                <Text style={styles.price}>
+                  {(p.currency === 'EUR' ? '€' : '$')}{Number(item.price).toFixed(2)}
+                  <Text style={styles.unit}> {(p.currency || 'CUP')}</Text>
+                  {'  '}Stock: <Text style={{ color: low ? '#F97316' : '#10B981', fontWeight: '700' }}>{item.stock}</Text>
+                  {low ? ' ⚠ BAJO' : ''}
                 </Text>
                 {canManage && (
-                  <Text style={styles.hint}>Toca para ajustar stock · Mantén para editar</Text>
+                  <View style={{ flexDirection: 'row', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
+                    <Btn variant="ghost" label="± Ajustar" onPress={() => openAdjust(item)} style={{ paddingVertical: 4, paddingHorizontal: 8 }} />
+                    <Btn variant="ghost" label="Editar" onPress={() => openEdit(item as any)} style={{ paddingVertical: 4, paddingHorizontal: 8 }} />
+                    {p.active !== false
+                      ? <Btn variant="danger" label="Desactivar" onPress={() => confirmDelete(item as any)} style={{ paddingVertical: 4, paddingHorizontal: 8 }} />
+                      : <Btn variant="secondary" label="Activar" onPress={() => reactivateProduct(item.id)} style={{ paddingVertical: 4, paddingHorizontal: 8 }} />}
+                  </View>
                 )}
               </View>
-              <View style={{ alignItems: 'flex-end' }}>
-                <Text style={styles.price}>${Number(item.price).toFixed(2)}</Text>
-                <Badge
-                  label={`${item.stock} ${item.unit}`}
-                  color={low ? '#F97316' : '#10B981'}
-                />
-                {canManage && (
-                  <TouchableOpacity
-                    onPress={() => confirmDelete(item)}
-                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                  >
-                    <Text style={styles.deleteLink}>Desactivar</Text>
-                  </TouchableOpacity>
-                )}
-              </View>
-            </TouchableOpacity>
+              <Badge label={p.active !== false ? 'Activo' : 'Inactivo'} color={p.active !== false ? '#10B981' : '#888'} />
+            </View>
           );
         }}
       />
@@ -481,59 +507,64 @@ export default function InventarioScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  wrap: { flex: 1, backgroundColor: '#F8FAFC', padding: 16 },
+const createStyles = () => StyleSheet.create({
+  wrap: { flex: 1, backgroundColor: colors.bg, padding: 16 },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: 10,
   },
-  title: { fontSize: 22, fontWeight: '800', color: '#1E293B' },
+  title: { fontSize: 22, fontWeight: '800', color: colors.text },
   addBtn: {
-    backgroundColor: '#3B82F6',
+    backgroundColor: colors.primary,
     borderRadius: 12,
     paddingVertical: 7,
     paddingHorizontal: 14,
   },
   addBtnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
-  locRow: { flexDirection: 'row', gap: 8 },
+  locRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 16 },
   locChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
     borderWidth: 1,
-    borderColor: '#E2E8F0',
-    borderRadius: 20,
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-    backgroundColor: '#fff',
+    borderColor: colors.inputBorder,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: colors.inputBg,
   },
-  locChipActive: { backgroundColor: '#3B82F6', borderColor: '#3B82F6' },
-  locChipText: { fontSize: 12, fontWeight: '700', color: '#1E293B' },
+  locChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  locChipText: { fontSize: 12.5, fontWeight: '600', color: colors.text, maxWidth: 130 },
   locLabel: { fontSize: 12, color: colors.textMuted, marginBottom: 8, fontWeight: '600' },
   search: {
     borderWidth: 1,
-    borderColor: '#E2E8F0',
+    borderColor: colors.border,
     borderRadius: 12,
     paddingHorizontal: 12,
     paddingVertical: 9,
-    backgroundColor: '#fff',
+    backgroundColor: colors.bgCard,
     marginBottom: 12,
-    color: '#1E293B',
+    color: colors.text,
   },
   row: {
     flexDirection: 'row',
-    backgroundColor: '#fff',
+    backgroundColor: colors.bgCard,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#E2E8F0',
+    borderColor: colors.border,
     padding: 12,
     marginBottom: 8,
     alignItems: 'center',
   },
-  name: { fontWeight: '700', fontSize: 14, color: '#1E293B' },
+  name: { fontWeight: '700', fontSize: 14, color: colors.text },
   code: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
-  hint: { fontSize: 10, color: '#94A3B8', marginTop: 2 },
-  price: { fontWeight: '700', color: '#1E293B', marginBottom: 4 },
-  deleteLink: { fontSize: 11, color: '#EF4444', marginTop: 6 },
+  unit: { fontSize: 11, color: colors.textMuted, fontWeight: '400' },
+  subtitle: { fontSize: 14, color: colors.textMuted, marginTop: 2 },
+  hint: { fontSize: 10, color: colors.textMuted, marginTop: 2 },
+  price: { fontWeight: '700', color: colors.text, marginBottom: 4 },
+  deleteLink: { fontSize: 11, color: colors.danger, marginTop: 6 },
 
   modalBg: {
     flex: 1,
@@ -542,7 +573,7 @@ const styles = StyleSheet.create({
     padding: 24,
   },
   modalCard: {
-    backgroundColor: '#fff',
+    backgroundColor: colors.bgCard,
     borderRadius: 14,
     padding: 20,
   },
@@ -550,32 +581,32 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     fontSize: 16,
     marginBottom: 8,
-    color: '#1E293B',
+    color: colors.text,
   },
-  modalSub: { fontSize: 12, color: '#3B82F6', fontWeight: '600', marginBottom: 12 },
+  modalSub: { fontSize: 12, color: colors.primary, fontWeight: '600', marginBottom: 12 },
   typeRow: { flexDirection: 'row', gap: 8, marginBottom: 14 },
   typeBtn: {
     flex: 1,
     borderWidth: 1,
-    borderColor: '#E2E8F0',
+    borderColor: colors.border,
     borderRadius: 12,
     paddingVertical: 10,
     alignItems: 'center',
   },
   typeBtnActive: {
-    backgroundColor: '#3B82F6',
-    borderColor: '#3B82F6',
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
   },
-  typeBtnText: { color: '#1E293B', fontWeight: '600' },
+  typeBtnText: { color: colors.text, fontWeight: '600' },
   typeBtnTextActive: { color: '#fff' },
   qtyInput: {
     borderWidth: 1,
-    borderColor: '#E2E8F0',
+    borderColor: colors.border,
     borderRadius: 12,
     padding: 10,
     fontSize: 16,
     marginBottom: 16,
-    color: '#1E293B',
+    color: colors.text,
   },
   modalActions: {
     flexDirection: 'row',
@@ -584,7 +615,7 @@ const styles = StyleSheet.create({
   },
   cancelBtn: { paddingVertical: 10, paddingHorizontal: 16 },
   saveBtn: {
-    backgroundColor: '#3B82F6',
+    backgroundColor: colors.primary,
     paddingVertical: 10,
     paddingHorizontal: 18,
     borderRadius: 12,
@@ -599,12 +630,26 @@ const styles = StyleSheet.create({
   },
   fieldInput: {
     borderWidth: 1,
-    borderColor: '#E2E8F0',
+    borderColor: colors.border,
     borderRadius: 12,
     paddingHorizontal: 10,
     paddingVertical: 8,
     fontSize: 14,
-    color: '#1E293B',
-    backgroundColor: '#F8FAFC',
+    color: colors.text,
+    backgroundColor: colors.bg,
   },
 });
+
+// Estilos VIVOS: se reconstruyen cuando cambia el tema (dark mode).
+let __stylesVersion = -1;
+let __styles: ReturnType<typeof createStyles> | null = null;
+export const styles = new Proxy({} as ReturnType<typeof createStyles>, {
+  get(_t, prop) {
+    if (__stylesVersion !== themeRef.version || !__styles) {
+      __styles = createStyles();
+      __stylesVersion = themeRef.version;
+    }
+    return __styles[prop as keyof ReturnType<typeof createStyles>];
+  },
+});
+

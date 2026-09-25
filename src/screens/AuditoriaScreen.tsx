@@ -4,31 +4,31 @@ import {
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { AuditAPI } from '../api/endpoints';
-import { colors } from '../config/theme';
+import { colors, themeRef } from '../config/theme';
 import { Badge, EmptyState, ErrorBanner } from '../components/UI';
 import type { AuditLog } from '../types';
 
 // Mapeo de acciones a etiquetas legibles — igual que la web.
 const ACTION_LABELS: Record<string, { label: string; color: string }> = {
-  'auth.login': { label: '🔐 Login', color: '#3B82F6' },
+  'auth.login': { label: '🔐 Login', color: colors.primary },
   'auth.register': { label: '🏢 Registro', color: '#8B5CF6' },
-  'product.create': { label: '➕ Producto', color: '#10B981' },
-  'product.update': { label: '✏️ Producto', color: '#3B82F6' },
-  'product.delete': { label: '🗑 Producto', color: '#EF4444' },
-  'sale.create': { label: '🧾 Venta', color: '#10B981' },
-  'sale.void': { label: '🚫 Anulación', color: '#EF4444' },
+  'product.create': { label: '➕ Producto', color: colors.success },
+  'product.update': { label: '✏️ Producto', color: colors.primary },
+  'product.delete': { label: '🗑 Producto', color: colors.danger },
+  'sale.create': { label: '🧾 Venta', color: colors.success },
+  'sale.void': { label: '🚫 Anulación', color: colors.danger },
   'expense.create': { label: '💸 Egreso', color: '#F97316' },
-  'expense.delete': { label: '🗑 Egreso', color: '#EF4444' },
-  'user.create': { label: '➕ Usuario', color: '#10B981' },
-  'user.update': { label: '✏️ Usuario', color: '#3B82F6' },
-  'user.delete': { label: '🗑 Usuario', color: '#EF4444' },
+  'expense.delete': { label: '🗑 Egreso', color: colors.danger },
+  'user.create': { label: '➕ Usuario', color: colors.success },
+  'user.update': { label: '✏️ Usuario', color: colors.primary },
+  'user.delete': { label: '🗑 Usuario', color: colors.danger },
   'transfer.create': { label: '🚚 Envío', color: '#8B5CF6' },
-  'transfer.approve': { label: '✅ Envío ok', color: '#10B981' },
-  'transfer.reject': { label: '❌ Envío rech.', color: '#EF4444' },
+  'transfer.approve': { label: '✅ Envío ok', color: colors.success },
+  'transfer.reject': { label: '❌ Envío rech.', color: colors.danger },
   'location.adjust_stock': { label: '📦 Ajuste stock', color: '#F97316' },
-  'closing.take_reading': { label: '📸 Lectura', color: '#3B82F6' },
-  'closing.confirm': { label: '🧮 Cierre', color: '#10B981' },
-  'subscription.payment': { label: '💳 Pago', color: '#10B981' },
+  'closing.take_reading': { label: '📸 Lectura', color: colors.primary },
+  'closing.confirm': { label: '🧮 Cierre', color: colors.success },
+  'subscription.payment': { label: '💳 Pago', color: colors.success },
 };
 
 const ENTITY_FILTERS = [
@@ -114,7 +114,7 @@ export default function AuditoriaScreen() {
             : <EmptyState icon="🕵️" text="No hay registros de auditoría" />
         }
         renderItem={({ item: r }) => {
-          const meta = ACTION_LABELS[r.action] || { label: r.action, color: '#64748B' };
+          const meta = ACTION_LABELS[r.action] || { label: r.action, color: colors.textMuted };
           const detail = detailText(r.detail);
           return (
             <View style={styles.row}>
@@ -139,23 +139,37 @@ export default function AuditoriaScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  wrap: { flex: 1, backgroundColor: '#F8FAFC', padding: 12 },
-  title: { fontSize: 22, fontWeight: '800', color: '#1E293B' },
+const createStyles = () => StyleSheet.create({
+  wrap: { flex: 1, backgroundColor: colors.bg, padding: 12 },
+  title: { fontSize: 22, fontWeight: '800', color: colors.text },
   subtitle: { fontSize: 12, color: colors.textMuted, marginTop: 2, marginBottom: 10 },
   filterRow: { flexDirection: 'row', gap: 6 },
   filterChip: {
-    borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 20,
-    paddingHorizontal: 12, paddingVertical: 6, backgroundColor: '#fff',
+    borderWidth: 1, borderColor: colors.border, borderRadius: 20,
+    paddingHorizontal: 12, paddingVertical: 6, backgroundColor: colors.bgCard,
   },
-  filterChipActive: { backgroundColor: '#3B82F6', borderColor: '#3B82F6' },
-  filterText: { fontSize: 12, fontWeight: '600', color: '#1E293B' },
+  filterChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  filterText: { fontSize: 12, fontWeight: '600', color: colors.text },
   row: {
-    backgroundColor: '#fff', borderRadius: 12, borderWidth: 1,
-    borderColor: '#E2E8F0', padding: 12, marginBottom: 8,
+    backgroundColor: colors.bgCard, borderRadius: 12, borderWidth: 1,
+    borderColor: colors.border, padding: 12, marginBottom: 8,
   },
-  action: { fontWeight: '700', fontSize: 13, color: '#1E293B' },
-  userName: { fontSize: 11, color: '#475569', marginTop: 4, fontWeight: '600' },
+  action: { fontWeight: '700', fontSize: 13, color: colors.text },
+  userName: { fontSize: 11, color: colors.textSecondary, marginTop: 4, fontWeight: '600' },
   detail: { fontSize: 11, color: colors.textMuted, marginTop: 2 },
-  date: { fontSize: 10, color: '#94A3B8', marginTop: 4 },
+  date: { fontSize: 10, color: colors.textMuted, marginTop: 4 },
 });
+
+// Estilos VIVOS: se reconstruyen cuando cambia el tema (dark mode).
+let __stylesVersion = -1;
+let __styles: ReturnType<typeof createStyles> | null = null;
+export const styles = new Proxy({} as ReturnType<typeof createStyles>, {
+  get(_t, prop) {
+    if (__stylesVersion !== themeRef.version || !__styles) {
+      __styles = createStyles();
+      __stylesVersion = themeRef.version;
+    }
+    return __styles[prop as keyof ReturnType<typeof createStyles>];
+  },
+});
+

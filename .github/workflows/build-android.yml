@@ -25,23 +25,21 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Generate Android project
-        run: |
-          npx react-native@0.74.5 init temp_project --version 0.74.5 --skip-install
-          cp -r temp_project/android .
-          rm -rf temp_project
+      - name: Install dependencies (CI)
+        run: npm ci
 
-      - name: Install dependencies
-        run: npm install
-
-      - name: Generate JS bundle
-        run: |
-          mkdir -p android/app/src/main/assets
-          npx react-native bundle --platform android --dev false --entry-file index.js --bundle-output android/app/src/main/assets/index.android.bundle --assets-dest android/app/src/main/res
+      # Genera el proyecto android nativo desde app.json + dependencias de
+      # Expo (SDK 57 / RN 0.81), la vía oficial. Sustituye al antiguo
+      # "react-native@0.74.5 init" cuya plantilla era incompatible con el JS.
+      # Va DESPUÉS de npm ci para que npx use el CLI expo local (SDK 57).
+      - name: Generate Android project (expo prebuild)
+        run: npx expo prebuild --platform android --no-install
 
       - name: Make gradlew executable
         run: chmod +x android/gradlew
 
+      # En release, Gradle empaqueta el JS solo (tarea bundleReleaseJsAndAssets):
+      # no hace falta un paso manual de react-native bundle.
       - name: Build APK (Release)
         run: |
           cd android

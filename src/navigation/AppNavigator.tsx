@@ -1,16 +1,19 @@
 import React, { useState } from 'react';
-import { TouchableOpacity, Text, Alert, View, StyleSheet, Modal, Pressable } from 'react-native';
+import { TouchableOpacity, Text, Alert, View, Image, StyleSheet, Modal, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { NavigationContainer } from '@react-navigation/native';
+import { NavigationContainer, DefaultTheme, DarkTheme } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { useAuth } from '../context/AuthContext';
 import { useSync } from '../context/SyncContext';
+import { useTheme } from '../context/ThemeContext';
 import { ROLES } from '../config/roles';
-import { colors, shadow } from '../config/theme';
+import { colors, shadow, NAVY, themeRef } from '../config/theme';
 import { PRIVACY_POLICY_MD, TERMS_MD } from '../config/legalContent';
+import type { User } from '../types';
 import PlanModal from '../components/PlanModal';
 import LegalModal from '../components/LegalModal';
 import WelcomeTour from '../components/WelcomeTour';
+import Icon from '../components/Icon';
 
 import DashboardScreen from '../screens/DashboardScreen';
 import InventarioScreen from '../screens/InventarioScreen';
@@ -22,46 +25,45 @@ import CierreCajaScreen from '../screens/CierreCajaScreen';
 import TransferenciasScreen from '../screens/TransferenciasScreen';
 import AuditoriaScreen from '../screens/AuditoriaScreen';
 import MonedasScreen from '../screens/MonedasScreen';
+import DiscountsScreen from '../screens/DiscountsScreen';
 
 const Tab = createBottomTabNavigator();
 
-// Emojis modernos como íconos de tab
-const TAB_EMOJI: Record<string, string> = {
-  dashboard: '📊',
-  inventario: '📦',
-  pos: '🖥️',
-  facturacion: '🧾',
-  contabilidad: '💰',
-  cierre: '🧮',
-  transferencias: '🚚',
-  auditoria: '🕵️',
-  usuarios: '👥',
-  monedas: '💱',
-};
-
-interface TabDef {
-  key: string;
-  label: string;
-  component: React.ComponentType<any>;
-}
-
-const ALL_TABS: TabDef[] = [
-  { key: 'dashboard', label: 'Inicio', component: DashboardScreen },
-  { key: 'inventario', label: 'Inventario', component: InventarioScreen },
-  { key: 'pos', label: 'Vender', component: POSScreen },
-  { key: 'facturacion', label: 'Facturas', component: FacturacionScreen },
-  { key: 'contabilidad', label: 'Gastos', component: ContabilidadScreen },
-  { key: 'cierre', label: 'Cierre', component: CierreCajaScreen },
-  { key: 'transferencias', label: 'Envíos', component: TransferenciasScreen },
-  { key: 'auditoria', label: 'Auditoría', component: AuditoriaScreen },
-  { key: 'monedas', label: 'Monedas', component: MonedasScreen },
-  { key: 'usuarios', label: 'Usuarios', component: UsuariosScreen },
+// ─── NAV ITEMS (paridad 1:1 con App.tsx de la web) ───────────────────────────
+// Mismos ids, labels e iconos que la barra inferior / sidebar de la web.
+// Los módulos usuarios/auditoria/monedas/descuentos NO van en la barra: en la
+// web se abren desde el menú de perfil y aquí se replican igual (screens
+// ocultas a las que el menú navega).
+const NAV_ITEMS: { key: string; label: string; icon: string; component: React.ComponentType<any> }[] = [
+  { key: 'dashboard',    label: 'Dashboard',      icon: 'dashboard',    component: DashboardScreen },
+  { key: 'inventario',   label: 'Inventario',     icon: 'inventario',   component: InventarioScreen },
+  { key: 'pos',          label: 'Punto de Venta', icon: 'pos',          component: POSScreen },
+  { key: 'facturacion',  label: 'Facturas',       icon: 'facturacion',  component: FacturacionScreen },
+  { key: 'contabilidad', label: 'Contabilidad',   icon: 'contabilidad', component: ContabilidadScreen },
+  { key: 'cierre',       label: 'Cierre de Caja', icon: 'cierre',       component: CierreCajaScreen },
+  { key: 'transferencias', label: 'Envíos',       icon: 'transferencias', component: TransferenciasScreen },
 ];
 
-function HeaderRight({ onOpenPlan, onOpenLegal, onOpenTour }: { onOpenPlan: () => void; onOpenLegal: (doc: 'privacy' | 'terms') => void; onOpenTour: () => void }) {
+// Screens de menú (sin botón en la tab bar)
+const MENU_SCREENS: { key: string; label: string; icon: string; component: React.ComponentType<any> }[] = [
+  { key: 'usuarios',   label: 'Usuarios',    icon: 'usuarios',   component: UsuariosScreen },
+  { key: 'auditoria',  label: 'Auditoría',   icon: 'auditoria',  component: AuditoriaScreen },
+  { key: 'descuentos', label: 'Descuentos',  icon: 'facturacion', component: DiscountsScreen },
+  { key: 'monedas',    label: 'Monedas y Tasas', icon: 'contabilidad', component: MonedasScreen },
+];
+
+function HeaderRight({ navigation, onOpenPlan, onOpenLegal, onOpenTour, onOpenModule }: {
+  navigation: any;
+  onOpenPlan: () => void;
+  onOpenLegal: (doc: 'privacy' | 'terms') => void;
+  onOpenTour: () => void;
+  onOpenModule: (key: string) => void;
+}) {
   const { user, logout, online } = useAuth();
+  const { mode, toggle: toggleTheme } = useTheme();
   const { pendingCount, conflictCount, syncing, syncNow } = useSync();
   const [menuOpen, setMenuOpen] = useState(false);
+  const perms = ROLES[user?.role || '']?.perms || [];
 
   const confirmLogout = () => {
     setMenuOpen(false);
@@ -73,21 +75,28 @@ function HeaderRight({ onOpenPlan, onOpenLegal, onOpenTour }: { onOpenPlan: () =
 
   const roleColor = ROLES[user?.role || '']?.color || colors.primary;
 
+  // Item del menú con icono SVG real (paridad con el menú de perfil web)
+  const Item = ({ icon, label, onPress, color }: { icon: string; label: string; onPress: () => void; color?: string }) => (
+    <TouchableOpacity style={s.menuItem} onPress={() => { setMenuOpen(false); onPress(); }}>
+      <Icon name={icon} size={16} color={color || colors.textSecondary} />
+      <Text style={[s.menuItemText, color ? { color } : null]}>{label}</Text>
+    </TouchableOpacity>
+  );
+
   return (
-    <View style={styles.headerRight}>
+    <View style={s.headerRight}>
+      {/* Pills de sync — equivalente móvil del OfflineBanner de la web */}
       {!online && (
-        <View style={styles.offlinePill}>
-          <Text style={styles.offlinePillText}>● OFFLINE</Text>
+        <View style={s.offlinePill}>
+          <Text style={s.offlinePillText}>● OFFLINE</Text>
         </View>
       )}
-      {/* Contador de ventas offline pendientes/conflictos — paridad con
-          OfflineBanner de la web. Toca para forzar sincronización. */}
       {(pendingCount > 0 || conflictCount > 0) && (
         <TouchableOpacity
-          style={[styles.syncPill, conflictCount > 0 && styles.syncPillConflict]}
+          style={[s.syncPill, conflictCount > 0 && s.syncPillConflict]}
           onPress={() => syncNow(true)}
         >
-          <Text style={styles.syncPillText}>
+          <Text style={s.syncPillText}>
             {conflictCount > 0
               ? `⚠ ${conflictCount} conflicto${conflictCount !== 1 ? 's' : ''}`
               : syncing
@@ -96,45 +105,45 @@ function HeaderRight({ onOpenPlan, onOpenLegal, onOpenTour }: { onOpenPlan: () =
           </Text>
         </TouchableOpacity>
       )}
+      {/* Avatar — idéntico a la web: círculo con color de rol e inicial */}
       <TouchableOpacity
         onPress={() => setMenuOpen(true)}
-        style={[styles.avatarBtn, { backgroundColor: roleColor }]}
+        style={[s.avatarBtn, { backgroundColor: roleColor }]}
       >
-        <Text style={styles.avatarText}>{user?.name?.charAt(0)?.toUpperCase() || '?'}</Text>
+        <Text style={s.avatarText}>{user?.name?.charAt(0)?.toUpperCase() || '?'}</Text>
       </TouchableOpacity>
 
       <Modal visible={menuOpen} transparent animationType="fade" onRequestClose={() => setMenuOpen(false)}>
-        <Pressable style={styles.menuOverlay} onPress={() => setMenuOpen(false)}>
-          <Pressable style={styles.menuCard} onPress={() => {}}>
-            <View style={styles.menuHeader}>
-              <Text style={styles.menuName}>{user?.name}</Text>
-              <Text style={styles.menuEmail}>{user?.email}</Text>
-              <View style={[styles.roleBadge, { backgroundColor: roleColor + '18' }]}>
-                <Text style={[styles.roleBadgeText, { color: roleColor }]}>{ROLES[user?.role || '']?.label || user?.role}</Text>
+        <Pressable style={s.menuOverlay} onPress={() => setMenuOpen(false)}>
+          <Pressable style={s.menuCard} onPress={() => {}}>
+            {/* Header del menú — igual que la web: nombre, email, badge de rol */}
+            <View style={s.menuHeader}>
+              <Text style={s.menuName}>{user?.name}</Text>
+              <Text style={s.menuEmail}>{user?.email}</Text>
+              <View style={[s.roleBadge, { backgroundColor: roleColor + '18' }]}>
+                <Text style={[s.roleBadgeText, { color: roleColor }]}>{ROLES[user?.role || '']?.label || user?.role}</Text>
               </View>
             </View>
 
-            <TouchableOpacity style={styles.menuItem} onPress={() => { setMenuOpen(false); onOpenPlan(); }}>
-              <Text style={styles.menuItemText}>💳  Mi Plan</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.menuItem} onPress={() => { setMenuOpen(false); onOpenTour(); }}>
-              <Text style={styles.menuItemText}>👋  Ver tour de bienvenida</Text>
-            </TouchableOpacity>
-
-            <View style={styles.menuDivider} />
-
-            <TouchableOpacity style={styles.menuItem} onPress={() => { setMenuOpen(false); onOpenLegal('privacy'); }}>
-              <Text style={styles.menuItemText}>📄  Política de Privacidad</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.menuItem} onPress={() => { setMenuOpen(false); onOpenLegal('terms'); }}>
-              <Text style={styles.menuItemText}>📄  Términos y Condiciones</Text>
+            <Item icon="facturacion" label="Mi Plan" onPress={onOpenPlan} />
+            {user?.role === 'admin' && <Item icon="usuarios" label="Usuarios" onPress={() => onOpenModule('usuarios')} />}
+            {perms.includes('auditoria') && <Item icon="auditoria" label="Auditoría" onPress={() => onOpenModule('auditoria')} />}
+            {user?.role === 'admin' && <Item icon="facturacion" label="Descuentos" onPress={() => onOpenModule('descuentos')} />}
+            {user?.role === 'admin' && <Item icon="contabilidad" label="Monedas y Tasas" onPress={() => onOpenModule('monedas')} />}
+            <Item icon="dashboard" label="Ver tour de bienvenida" onPress={onOpenTour} />
+            <TouchableOpacity style={s.menuItem} onPress={() => { toggleTheme(); }}>
+              <Text style={{ fontSize: 16 }}>{mode === 'dark' ? '☀️' : '🌙'}</Text>
+              <Text style={s.menuItemText}>{mode === 'dark' ? 'Modo claro' : 'Modo oscuro'}</Text>
             </TouchableOpacity>
 
-            <View style={styles.menuDivider} />
+            <View style={s.menuDivider} />
 
-            <TouchableOpacity style={styles.menuItem} onPress={confirmLogout}>
-              <Text style={[styles.menuItemText, { color: colors.primary }]}>🚪  Cerrar sesión</Text>
-            </TouchableOpacity>
+            <Item icon="doc" label="Política de Privacidad" onPress={() => onOpenLegal('privacy')} />
+            <Item icon="doc" label="Términos y Condiciones" onPress={() => onOpenLegal('terms')} />
+
+            <View style={s.menuDivider} />
+
+            <Item icon="logout" label="Cerrar sesión" onPress={confirmLogout} color={colors.primary} />
           </Pressable>
         </Pressable>
       </Modal>
@@ -142,11 +151,7 @@ function HeaderRight({ onOpenPlan, onOpenLegal, onOpenTour }: { onOpenPlan: () =
   );
 }
 
-interface TrialBannerInfo {
-  daysLeft: number;
-  urgent: boolean;
-  color: string;
-}
+interface TrialBannerInfo { daysLeft: number; urgent: boolean; color: string }
 
 function getTrialBannerInfo(user: User | null): TrialBannerInfo | null {
   if (!user?.company?.trialActive) return null;
@@ -162,8 +167,8 @@ function getTrialBannerInfo(user: User | null): TrialBannerInfo | null {
 function TrialBanner({ info, onPress }: { info: TrialBannerInfo; onPress: () => void }) {
   const { daysLeft, urgent, color } = info;
   return (
-    <TouchableOpacity style={[styles.trialBanner, { backgroundColor: color }]} onPress={onPress}>
-      <Text style={styles.trialBannerText}>
+    <TouchableOpacity style={[s.trialBanner, { backgroundColor: color }]} onPress={onPress}>
+      <Text style={s.trialBannerText}>
         {urgent ? '⚠ ' : '🎁 '}
         Período de prueba gratis — {daysLeft} día{daysLeft !== 1 ? 's' : ''} restante{daysLeft !== 1 ? 's' : ''}
         {urgent ? ' · Toca aquí para ver planes' : ' · Plan Empresarial completo'}
@@ -174,26 +179,34 @@ function TrialBanner({ info, onPress }: { info: TrialBannerInfo; onPress: () => 
 
 export default function AppNavigator() {
   const { user, logout } = useAuth();
+  const { mode, version } = useTheme();
   const perms = ROLES[user?.role || '']?.perms || [];
-  const tabs = ALL_TABS.filter(t => perms.includes(t.key));
+  const isDark = mode === 'dark';
 
-  // Blindaje: si el rol del usuario no produce ninguna pestaña (rol nuevo,
-  // usuario cacheado antiguo, etc.), mostramos un aviso en vez de dejar que
-  // el Tab.Navigator crashee con "Couldn't find any screens for the
-  // navigator" — que es el crash reportado al iniciar sesión.
+  // Barra inferior: solo los 7 nav items de la web filtrados por permisos.
+  const tabs = NAV_ITEMS.filter(n => perms.includes(n.key));
+  // Screens de menú disponibles según rol (se registran ocultas para poder
+  // navegar a ellas desde el menú de perfil).
+  const menuScreens = MENU_SCREENS.filter(t =>
+    (t.key === 'usuarios' && user?.role === 'admin') ||
+    (t.key === 'descuentos' && user?.role === 'admin') ||
+    (t.key === 'monedas' && user?.role === 'admin') ||
+    (t.key === 'auditoria' && perms.includes('auditoria'))
+  );
+
   if (tabs.length === 0) {
     return (
-      <View style={styles.noTabsWrap}>
-        <Text style={styles.noTabsTitle}>Sin módulos para tu rol</Text>
-        <Text style={styles.noTabsText}>
+      <View style={s.noTabsWrap}>
+        <Text style={s.noTabsTitle}>Sin módulos para tu rol</Text>
+        <Text style={s.noTabsText}>
           Tu usuario (rol: {String(user?.role || 'desconocido')}) no tiene
           módulos asignados. Cierra sesión y vuelve a entrar para refrescar
           tus permisos, o contacta al administrador.
         </Text>
-        <TouchableOpacity style={styles.noTabsBtn} onPress={logout}>
-          <Text style={styles.noTabsBtnText}>Cerrar sesión</Text>
+        <TouchableOpacity style={s.noTabsBtn} onPress={logout}>
+          <Text style={s.noTabsBtnText}>Cerrar sesión</Text>
         </TouchableOpacity>
-  </View>
+      </View>
     );
   }
 
@@ -205,54 +218,86 @@ export default function AppNavigator() {
   return (
     <View style={{ flex: 1 }}>
       {trialInfo && (
-        <SafeAreaView edges={['top']} style={{ backgroundColor: trialInfo.color }}>
+        <SafeAreaView edges={['top']} style={{ backgroundColor: NAVY }}>
           <TrialBanner info={trialInfo} onPress={() => setPlanOpen(true)} />
         </SafeAreaView>
       )}
 
-      <NavigationContainer>
+      {/* key={version}: al cambiar el tema re-monta el navigator con los
+          estilos nuevos. El tema SIEMPRE extiende DefaultTheme/DarkTheme:
+          la v7 exige el campo fonts (sin él crashea el HeaderTitle). */}
+      <NavigationContainer key={version} theme={{
+        ...(isDark ? DarkTheme : DefaultTheme),
+        dark: isDark,
+        colors: {
+          ...(isDark ? DarkTheme : DefaultTheme).colors,
+          primary: colors.primary,
+          background: colors.bg,
+          card: NAVY,
+          text: colors.text,
+          border: colors.border,
+          notification: colors.danger,
+        },
+      }}>
         <Tab.Navigator
-          screenOptions={({ route }) => {
-            const tabKey = ALL_TABS.find(t => t.label === route.name)?.key;
-            return {
-              headerRight: () => (
-                <HeaderRight
-                  onOpenPlan={() => setPlanOpen(true)}
-                  onOpenLegal={(doc) => setLegalDoc(doc)}
-                  onOpenTour={() => setTourOpen(true)}
-                />
-              ),
-              headerStyle: {
-                backgroundColor: '#ffffff',
-                ...shadow.sm,
-              },
-              headerTitleStyle: {
-                fontWeight: '800',
-                fontSize: 17,
-                color: colors.text,
-              },
-              headerTintColor: colors.text,
-              tabBarActiveTintColor: colors.primary,
-              tabBarInactiveTintColor: colors.textMuted,
-              tabBarLabelStyle: { fontSize: 10, fontWeight: '700', marginBottom: 2 },
-              tabBarStyle: {
-                backgroundColor: '#ffffff',
-                borderTopColor: colors.border,
-                borderTopWidth: 1,
-                height: 60,
-                paddingTop: 6,
-                ...shadow.sm,
-              },
-              tabBarIcon: ({ focused }: { focused: boolean }) => (
-                <View style={[styles.tabIcon, focused && styles.tabIconActive]}>
-                  <Text style={{ fontSize: 20 }}>{TAB_EMOJI[tabKey || ''] || '●'}</Text>
+          screenOptions={({ navigation, route }) => ({
+            headerStyle: { backgroundColor: NAVY, ...shadow.sm },
+            // Header navy de marca con logo — idéntico al top header de la web
+            headerTitle: () => (
+              <View style={s.brandRow}>
+                <Image source={require('../../assets/images/icon.png')} style={s.brandLogo} />
+                <Text style={s.brandName}>CubaGest</Text>
+              </View>
+            ),
+            headerRight: () => (
+              <HeaderRight
+                navigation={navigation}
+                onOpenPlan={() => setPlanOpen(true)}
+                onOpenLegal={(doc) => setLegalDoc(doc)}
+                onOpenTour={() => setTourOpen(true)}
+                onOpenModule={(key) => navigation.navigate(key === 'monedas' ? 'Monedas y Tasas' : key === 'descuentos' ? 'Descuentos' : key === 'usuarios' ? 'Usuarios' : 'Auditoría')}
+              />
+            ),
+            headerTintColor: '#ffffff',
+            tabBarActiveTintColor: colors.primary,
+            tabBarInactiveTintColor: colors.textMuted,
+            // Labels compactos + tab bar más alta: los 7 items de la web caben
+            // sin cortar el nombre (el problema era la altura fija con labels
+            // largos tipo "Punto de Venta").
+            tabBarLabelStyle: { fontSize: 9, fontWeight: '500', marginBottom: 3 },
+            tabBarStyle: {
+              backgroundColor: colors.bgCard,
+              borderTopColor: colors.border,
+              borderTopWidth: 1,
+              height: 64,
+              paddingTop: 8,
+              paddingBottom: 6,
+              ...shadow.sm,
+            },
+            tabBarItemStyle: { paddingVertical: 2, justifyContent: 'center' },
+            // Icono SVG real por tab (mismo Icon que la web) + puntito activo
+            tabBarIcon: ({ focused }: { focused: boolean }) => {
+              const item = [...NAV_ITEMS, ...MENU_SCREENS].find(t => t.label === route.name);
+              return (
+                <View style={s.tabIcon}>
+                  <Icon name={item?.icon || 'dashboard'} size={21} color={focused ? colors.primary : colors.textMuted} />
+                  {focused && <View style={s.tabDot} />}
                 </View>
-              ),
-            };
-          }}
+              );
+            },
+          })}
         >
           {tabs.map(t => (
             <Tab.Screen key={t.key} name={t.label} component={t.component} />
+          ))}
+          {/* Screens del menú de perfil: registradas sin botón en la tab bar */}
+          {menuScreens.map(t => (
+            <Tab.Screen
+              key={t.key}
+              name={t.label}
+              component={t.component}
+              options={{ tabBarButton: () => null }}
+            />
           ))}
         </Tab.Navigator>
       </NavigationContainer>
@@ -275,8 +320,12 @@ export default function AppNavigator() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = () => StyleSheet.create({
   headerRight: { flexDirection: 'row', alignItems: 'center', gap: 8, marginRight: 14 },
+  brandRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  brandLogo: { width: 32, height: 32, borderRadius: 8 },
+  brandName: { color: '#ffffff', fontWeight: '800', fontSize: 15 },
+
   offlinePill: {
     backgroundColor: colors.warning + '20',
     borderRadius: 20,
@@ -284,44 +333,54 @@ const styles = StyleSheet.create({
   },
   offlinePillText: { color: colors.warning, fontSize: 10, fontWeight: '700' },
   syncPill: {
-    backgroundColor: '#EFF6FF',
+    backgroundColor: colors.primaryTint,
     borderRadius: 20,
     paddingHorizontal: 8, paddingVertical: 3,
-    borderWidth: 1, borderColor: '#BFDBFE',
+    borderWidth: 1, borderColor: colors.primaryTintB,
   },
-  syncPillConflict: {
-    backgroundColor: '#FFF7ED',
-    borderColor: '#FED7AA',
-  },
-  syncPillText: { color: '#1D4ED8', fontSize: 10, fontWeight: '700' },
+  syncPillConflict: { backgroundColor: colors.warningBg, borderColor: colors.warningBorder },
+  syncPillText: { color: colors.primary, fontSize: 10, fontWeight: '700' },
 
-  avatarBtn: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
-  avatarText: { color: '#fff', fontWeight: '800', fontSize: 13 },
+  avatarBtn: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
+  avatarText: { color: '#fff', fontWeight: '800', fontSize: 14 },
 
-  menuOverlay: { flex: 1, backgroundColor: 'rgba(15,23,42,0.35)' },
+  menuOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' },
   menuCard: {
-    position: 'absolute', top: 56, right: 12, minWidth: 230,
-    backgroundColor: '#fff', borderRadius: 12, borderWidth: 1, borderColor: colors.border,
+    position: 'absolute', top: 110, right: 12, minWidth: 230,
+    backgroundColor: colors.bgCard, borderRadius: 12, borderWidth: 1, borderColor: colors.border,
     paddingVertical: 6, ...shadow.md,
   },
-  menuHeader: { paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: colors.borderLight },
+  menuHeader: { paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: colors.border },
   menuName: { fontWeight: '700', fontSize: 14, color: colors.text },
   menuEmail: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
   roleBadge: { alignSelf: 'flex-start', marginTop: 6, borderRadius: 20, paddingHorizontal: 8, paddingVertical: 2 },
   roleBadgeText: { fontSize: 10, fontWeight: '700' },
-  menuItem: { paddingHorizontal: 16, paddingVertical: 12 },
+  menuItem: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, paddingVertical: 10, marginHorizontal: 8, borderRadius: 12 },
   menuItemText: { fontSize: 14, fontWeight: '600', color: colors.textSecondary },
-  menuDivider: { height: 1, backgroundColor: colors.borderLight, marginVertical: 4 },
+  menuDivider: { height: 1, backgroundColor: colors.border, marginVertical: 4 },
 
   trialBanner: { paddingVertical: 8, paddingHorizontal: 16 },
   trialBannerText: { color: '#fff', fontSize: 11, fontWeight: '600', textAlign: 'center' },
 
-  tabIcon: { alignItems: 'center', justifyContent: 'center', width: 32, height: 28, borderRadius: 8 },
-  tabIconActive: { backgroundColor: colors.primary + '15' },
+  tabIcon: { alignItems: 'center', justifyContent: 'center', gap: 3 },
+  tabDot: { width: 3.5, height: 3.5, borderRadius: 2, backgroundColor: colors.primary },
 
-  noTabsWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, backgroundColor: '#F8FAFC' },
-  noTabsTitle: { fontSize: 18, fontWeight: '800', color: '#1E293B', marginBottom: 8 },
+  noTabsWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, backgroundColor: colors.bg },
+  noTabsTitle: { fontSize: 18, fontWeight: '800', color: colors.text, marginBottom: 8 },
   noTabsText: { fontSize: 13, color: colors.textMuted, textAlign: 'center', lineHeight: 20, marginBottom: 20 },
-  noTabsBtn: { backgroundColor: '#3B82F6', borderRadius: 10, paddingVertical: 10, paddingHorizontal: 22 },
+  noTabsBtn: { backgroundColor: colors.primary, borderRadius: 10, paddingVertical: 10, paddingHorizontal: 22 },
   noTabsBtnText: { color: '#fff', fontWeight: '700' },
+});
+
+// Estilos VIVOS: se reconstruyen cuando cambia el tema (dark mode).
+let __stylesVersion = -1;
+let __styles: ReturnType<typeof createStyles> | null = null;
+const s = new Proxy({} as ReturnType<typeof createStyles>, {
+  get(_t, prop) {
+    if (__stylesVersion !== themeRef.version || !__styles) {
+      __styles = createStyles();
+      __stylesVersion = themeRef.version;
+    }
+    return __styles[prop as keyof ReturnType<typeof createStyles>];
+  },
 });

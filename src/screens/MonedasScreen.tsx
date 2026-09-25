@@ -5,7 +5,7 @@ import {
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { SettingsAPI } from '../api/endpoints';
-import { colors } from '../config/theme';
+import { colors, themeRef } from '../config/theme';
 import { ErrorBanner } from '../components/UI';
 
 const CURRENCY_OPTIONS = ['CUP', 'USD', 'EUR', 'MLC'];
@@ -85,7 +85,7 @@ export default function MonedasScreen() {
                 <Text style={[styles.curName, locked && { color: colors.textMuted }]}>{m}</Text>
                 {locked && <Text style={styles.curHint}>moneda base — siempre activa</Text>}
               </View>
-              <Switch value={on} disabled={locked} onValueChange={() => toggleCurrency(m)} thumbColor={on ? '#3B82F6' : '#CBD5E1'} trackColor={{ true: '#93C5FD', false: '#E2E8F0' }} />
+              <Switch value={on} disabled={locked} onValueChange={() => toggleCurrency(m)} thumbColor={on ? colors.primary : '#CBD5E1'} trackColor={{ true: colors.primaryLight, false: colors.border }} />
             </View>
           );
         })}
@@ -150,24 +150,38 @@ export default function MonedasScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = () => StyleSheet.create({
   wrap: { flex: 1, backgroundColor: colors.bg },
   title: { fontSize: 16, fontWeight: '800', color: colors.text, marginTop: 12, marginBottom: 4 },
   hint: { fontSize: 12, color: colors.textMuted, marginBottom: 10, lineHeight: 17 },
-  card: { backgroundColor: '#fff', borderWidth: 1, borderColor: colors.border, borderRadius: 14, padding: 6, marginBottom: 12 },
+  card: { backgroundColor: colors.bgCard, borderWidth: 1, borderColor: colors.border, borderRadius: 14, padding: 6, marginBottom: 12 },
   curRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, paddingHorizontal: 10, borderBottomWidth: 1, borderBottomColor: colors.borderLight },
   curName: { fontSize: 15, fontWeight: '700', color: colors.text },
   curHint: { fontSize: 11, color: colors.textMuted },
   modeRow: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, borderBottomWidth: 1, borderBottomColor: colors.borderLight },
   modeDot: { fontSize: 16, color: '#CBD5E1' },
-  modeDotOn: { color: '#3B82F6' },
+  modeDotOn: { color: colors.primary },
   modeName: { fontSize: 14, fontWeight: '700', color: colors.text },
   modeHint: { fontSize: 11, color: colors.textMuted, marginTop: 1 },
   ratesHint: { fontSize: 12, color: colors.textMuted, padding: 10, paddingBottom: 4 },
   rateRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 10, paddingVertical: 6 },
   rateLabel: { width: 44, fontSize: 14, fontWeight: '700', color: colors.text },
-  rateInput: { flex: 1, borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8, backgroundColor: '#F8FAFC', color: colors.text, fontSize: 14 },
+  rateInput: { flex: 1, borderWidth: 1, borderColor: colors.border, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8, backgroundColor: colors.bg, color: colors.text, fontSize: 14 },
   rateValue: { fontSize: 13, color: colors.text, paddingHorizontal: 12, paddingVertical: 3 },
-  saveBtn: { backgroundColor: '#3B82F6', borderRadius: 12, paddingVertical: 13, alignItems: 'center', marginTop: 4 },
+  saveBtn: { backgroundColor: colors.primary, borderRadius: 12, paddingVertical: 13, alignItems: 'center', marginTop: 4 },
   saveText: { color: '#fff', fontWeight: '800', fontSize: 15 },
 });
+
+// Estilos VIVOS: se reconstruyen cuando cambia el tema (dark mode).
+let __stylesVersion = -1;
+let __styles: ReturnType<typeof createStyles> | null = null;
+export const styles = new Proxy({} as ReturnType<typeof createStyles>, {
+  get(_t, prop) {
+    if (__stylesVersion !== themeRef.version || !__styles) {
+      __styles = createStyles();
+      __stylesVersion = themeRef.version;
+    }
+    return __styles[prop as keyof ReturnType<typeof createStyles>];
+  },
+});
+

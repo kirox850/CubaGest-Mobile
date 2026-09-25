@@ -7,9 +7,10 @@ import { useFocusEffect } from '@react-navigation/native';
 import { SalesAPI } from '../api/endpoints';
 import { useAuth } from '../context/AuthContext';
 import { useSync } from '../context/SyncContext';
-import { colors } from '../config/theme';
-import { PAY_METHODS } from '../config/roles';
-import { EmptyState, ErrorBanner, Badge } from '../components/UI';
+import { colors, themeRef } from '../config/theme';
+import { PAY_METHODS, CURRENCY_SYMBOLS } from '../config/roles';
+import { EmptyState, ErrorBanner, Badge, Btn, Inp, Sel } from '../components/UI';
+import Icon from '../components/Icon';
 import { shareCSV } from '../utils/csv';
 import type { Sale } from '../types';
 import type { OfflineSale } from '../offline/offlineStore';
@@ -103,25 +104,40 @@ export default function FacturacionScreen() {
     ]);
   };
 
+  const pend = offlineSales.filter((s) => s.status === 'pending').length;
+  const conf = offlineSales.filter((s) => s.status === 'conflict').length;
+
   return (
     <View style={styles.wrap}>
       <ErrorBanner message={error} />
 
-      <TouchableOpacity
-        style={styles.csvBtn}
-        onPress={() => shareCSV('ventas', sales as any, [
-          { key: 'invoiceNumber', label: 'Factura' }, { key: 'date', label: 'Fecha' }, { key: 'clientName', label: 'Cliente' },
-          { key: 'subtotal', label: 'Subtotal' }, { key: 'discountTotal', label: 'Descuento' }, { key: 'tax', label: 'Impuesto' },
-          { key: 'total', label: 'Total' }, { key: 'currency', label: 'Moneda' }, { key: 'payMethod', label: 'Método' },
-          { key: 'status', label: 'Estado' },
-        ])}
-      >
-        <Text style={styles.csvBtnText}>⇩ Exportar CSV (respaldo)</Text>
-      </TouchableOpacity>
+      {/* Header — igual que la web: título + contador emitidas + botones */}
+      <View style={styles.header}>
+        <View style={{ flexShrink: 1 }}>
+          <Text style={styles.title}>Facturas</Text>
+          <Text style={styles.subtitle}>
+            {sales.filter((s) => s.status === 'emitida').length} emitidas
+            {pend > 0 ? `  · ${pend} offline` : ''}
+            {conf > 0 ? `  · ${conf} conflicto${conf !== 1 ? 's' : ''}` : ''}
+          </Text>
+        </View>
+        <View style={{ flexDirection: 'row', gap: 8 }}>
+          <Btn variant="secondary" icon="refresh" label="Actualizar" onPress={load} />
+          <Btn variant="secondary" icon="doc" label="CSV" onPress={() => shareCSV('ventas', sales as any, [
+            { key: 'invoiceNumber', label: 'Factura' }, { key: 'date', label: 'Fecha' }, { key: 'clientName', label: 'Cliente' },
+            { key: 'subtotal', label: 'Subtotal' }, { key: 'discountTotal', label: 'Descuento' }, { key: 'tax', label: 'Impuesto' },
+            { key: 'total', label: 'Total' }, { key: 'currency', label: 'Moneda' }, { key: 'payMethod', label: 'Método' },
+            { key: 'status', label: 'Estado' },
+          ])} />
+        </View>
+      </View>
 
-      {/* Ventas offline pendientes / con conflicto — paridad con la web */}
+      {/* Ventas offline — caja naranja como la web */}
       {(pendingOffline.length > 0 || conflictOffline.length > 0 || syncMsg) && (
         <View style={styles.offlineBox}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <Text style={styles.offlineTitle}>⚡ Ventas offline</Text>
+          </View>
           {syncMsg ? <Text style={styles.syncMsg}>{syncMsg}</Text> : null}
           {pendingOffline.map((s: OfflineSale) => (
             <View key={s.localId} style={styles.offlineRow}>
@@ -146,13 +162,18 @@ export default function FacturacionScreen() {
         </View>
       )}
 
-      <TextInput
-        style={styles.search}
-        placeholder="Buscar por No. o cliente..."
-        placeholderTextColor={colors.textMuted}
-        value={search}
-        onChangeText={setSearch}
-      />
+      {/* Buscador con icono — igual que la web */}
+      <View style={{ justifyContent: 'center', marginBottom: 12 }}>
+        <View style={{ position: 'absolute', left: 10, zIndex: 1 }}>
+          <Icon name="search" size={15} color={colors.textMuted} />
+        </View>
+        <Inp
+          style={{ paddingLeft: 34 }}
+          placeholder="Buscar por No. factura o cliente..."
+          value={search}
+          onChangeText={setSearch}
+        />
+      </View>
 
       <FlatList
         data={filtered}
@@ -161,17 +182,21 @@ export default function FacturacionScreen() {
         ListEmptyComponent={<EmptyState text={online ? 'No hay facturas' : 'Sin conexión — mostrando solo ventas locales'} />}
         renderItem={({ item: s }) => (
           <TouchableOpacity style={[styles.row, s.status === 'anulada' && { opacity: 0.5 }]} onPress={() => setViewInv(s)}>
-            <View style={{ flex: 1 }}>
+            <View style={{ flex: 1, minWidth: 0 }}>
               <Text style={styles.invoice}>{s.invoiceNumber || s.id}</Text>
               <Text style={styles.client}>{s.clientName || s.client}</Text>
-              <Text style={styles.date}>{(s.date || s.createdAt || '').split('T')[0]}</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}>
+                <Text style={styles.date}>{(s.date || s.createdAt || '').split('T')[0]}</Text>
+                <Badge label={PAY_METHODS.find((p) => p.id === s.payMethod)?.label || s.payMethod} color={colors.primary} />
+              </View>
             </View>
             <View style={{ alignItems: 'flex-end', gap: 4 }}>
-              <Text style={styles.amount}>${fmt(Number(s.total))}</Text>
+              <Text style={styles.amount}>{CURRENCY_SYMBOLS[s.currency] || '$'}{fmt(Number(s.total))}</Text>
               <Badge
                 label={s.status === 'emitida' ? 'Emitida' : 'Anulada'}
-                color={s.status === 'emitida' ? '#10B981' : '#EF4444'}
+                color={s.status === 'emitida' ? '#10B981' : colors.primary}
               />
+              <Icon name="eye" size={14} color={colors.primary} />
             </View>
           </TouchableOpacity>
         )}
@@ -185,26 +210,28 @@ export default function FacturacionScreen() {
               <Text style={styles.modalTitle}>Factura {viewInv.invoiceNumber || viewInv.id}</Text>
               <ScrollView>
                 <View style={styles.receipt}>
-                  <Text style={styles.receiptCenter}>CUBAGEST</Text>
-                  <Text style={styles.receiptCenter}>FACTURA COMERCIAL</Text>
-                  {viewInv.status === 'anulada' && <Text style={[styles.receiptCenter, { color: '#EF4444', fontWeight: '800' }]}>⚠ ANULADA</Text>}
+                  <Text style={styles.receiptCenter}>{user?.company?.name || 'Mi Negocio'}</Text>
+                  <Text style={styles.receiptCenter}>FACTURA</Text>
+                  <Text style={styles.receiptLine}>No. {viewInv.invoiceNumber || viewInv.id}</Text>
+                  {viewInv.status === 'anulada' && <Text style={[styles.receiptCenter, { color: colors.danger, fontWeight: '800' }]}>⚠ ANULADA</Text>}
                   <Text style={styles.receiptLine}>Fecha: {(viewInv.date || viewInv.createdAt || '').split('T')[0]}</Text>
                   <Text style={styles.receiptLine}>Cliente: {viewInv.clientName || viewInv.client}</Text>
-                  {viewInv.clientNit && <Text style={styles.receiptLine}>NIT: {viewInv.clientNit}</Text>}
+                  {viewInv.clientNit && viewInv.clientNit !== '00000000000' && <Text style={styles.receiptLine}>Carnet: {viewInv.clientNit}</Text>}
                   {viewInv.clientPhone && <Text style={styles.receiptLine}>Tel: {viewInv.clientPhone}</Text>}
                   <Text style={styles.receiptLine}>Metodo: {PAY_METHODS.find(p => p.id === viewInv.payMethod)?.label || viewInv.payMethod}</Text>
                   <Text style={styles.receiptDivider}>─────────────────────</Text>
-                  {(viewInv.items || viewInv.SaleItems || []).map((item, i) => (
+                  {(viewInv.items || (viewInv as any).SaleItems || []).map((item: any, i: number) => (
                     <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                       <Text style={styles.receiptLine}>{item.qty}x {item.name}</Text>
-                      <Text style={styles.receiptLine}>${fmt(Number(item.total) || item.price * item.qty)}</Text>
+                      <Text style={styles.receiptLine}>{CURRENCY_SYMBOLS[viewInv.currency] || '$'}{fmt(Number(item.total) || item.price * item.qty)}</Text>
                     </View>
                   ))}
                   <Text style={styles.receiptDivider}>─────────────────────</Text>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                     <Text style={[styles.receiptLine, { fontWeight: '800' }]}>TOTAL:</Text>
-                    <Text style={[styles.receiptLine, { fontWeight: '800' }]}>${fmt(Number(viewInv.total))} CUP</Text>
+                    <Text style={[styles.receiptLine, { fontWeight: '800' }]}>{CURRENCY_SYMBOLS[viewInv.currency] || '$'}{fmt(Number(viewInv.total))} {viewInv.currency || 'CUP'}</Text>
                   </View>
+                  <Text style={[styles.receiptCenter, { fontSize: 8, color: colors.textMuted, marginTop: 6 }]}>Hecho con CubaGest</Text>
                 </View>
               </ScrollView>
 
@@ -215,12 +242,12 @@ export default function FacturacionScreen() {
                       <Text style={{ color: '#fff', fontWeight: '700' }}>Anular</Text>
                     </TouchableOpacity>
                     <TouchableOpacity style={styles.btnSecondary} onPress={() => openEdit(viewInv)}>
-                      <Text style={{ color: '#1E293B', fontWeight: '600' }}>Editar datos</Text>
+                      <Text style={{ color: colors.text, fontWeight: '600' }}>Editar datos</Text>
                     </TouchableOpacity>
                   </>
                 )}
                 <TouchableOpacity style={styles.btnSecondary} onPress={() => setViewInv(null)}>
-                  <Text style={{ color: '#1E293B', fontWeight: '600' }}>Cerrar</Text>
+                  <Text style={{ color: colors.text, fontWeight: '600' }}>Cerrar</Text>
                 </TouchableOpacity>
               </View>
             </View>
@@ -234,17 +261,16 @@ export default function FacturacionScreen() {
           <View style={styles.modalBg}>
             <View style={styles.modalCard}>
               <Text style={styles.modalTitle}>Editar datos de factura</Text>
-              <Text style={styles.note}>Solo se pueden editar datos del cliente y metodo de pago.</Text>
-              <TextInput style={styles.input} value={editForm.clientName} onChangeText={v => setEditForm(f => ({ ...f, clientName: v }))} placeholder="Nombre del cliente" placeholderTextColor={colors.textMuted} />
-              <TextInput style={styles.input} value={editForm.clientNit} onChangeText={v => setEditForm(f => ({ ...f, clientNit: v }))} placeholder="NIT" keyboardType="numeric" maxLength={11} placeholderTextColor={colors.textMuted} />
-              <TextInput style={styles.input} value={editForm.clientPhone} onChangeText={v => setEditForm(f => ({ ...f, clientPhone: v }))} placeholder="Telefono" keyboardType="phone-pad" placeholderTextColor={colors.textMuted} />
-              <View style={styles.payRow}>
-                {PAY_METHODS.map(m => (
-                  <TouchableOpacity key={m.id} style={[styles.payBtn, editForm.payMethod === m.id && styles.payBtnActive]} onPress={() => setEditForm(f => ({ ...f, payMethod: m.id }))}>
-                    <Text style={[styles.payBtnText, editForm.payMethod === m.id && { color: '#fff' }]}>{m.label}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
+              <Text style={styles.note}>⚠ Solo se pueden editar los datos del cliente y método de pago. Los productos y totales no cambian.</Text>
+              <Inp style={{ marginBottom: 10 }} value={editForm.clientName} onChangeText={v => setEditForm(f => ({ ...f, clientName: v }))} placeholder="Nombre del cliente" />
+              <Inp style={{ marginBottom: 10 }} value={editForm.clientNit} onChangeText={v => setEditForm(f => ({ ...f, clientNit: v }))} placeholder="Carnet" keyboardType="numeric" maxLength={11} />
+              <Inp style={{ marginBottom: 10 }} value={editForm.clientPhone} onChangeText={v => setEditForm(f => ({ ...f, clientPhone: v }))} placeholder="Teléfono" keyboardType="phone-pad" />
+              <Sel
+                style={{ marginBottom: 12 }}
+                value={editForm.payMethod || 'efectivo'}
+                onValueChange={(v: string) => setEditForm(f => ({ ...f, payMethod: v }))}
+                items={PAY_METHODS.map(m => ({ label: m.label, value: m.id }))}
+              />
               <View style={styles.modalActions}>
                 <TouchableOpacity style={styles.btnSecondary} onPress={() => setEditModal(false)}>
                   <Text style={{ fontWeight: '600' }}>Cancelar</Text>
@@ -261,39 +287,55 @@ export default function FacturacionScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  wrap: { flex: 1, backgroundColor: '#F8FAFC', padding: 12 },
-  csvBtn: { backgroundColor: '#EFF6FF', borderWidth: 1, borderColor: '#BFDBFE', borderRadius: 10, paddingVertical: 9, alignItems: 'center', marginBottom: 10 },
-  csvBtnText: { color: '#1D4ED8', fontWeight: '700', fontSize: 13 },
-  offlineBox: { backgroundColor: '#EFF6FF', borderRadius: 12, borderWidth: 1, borderColor: '#BFDBFE', padding: 10, marginBottom: 10 },
+const createStyles = () => StyleSheet.create({
+  wrap: { flex: 1, backgroundColor: colors.bg, padding: 16 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14, gap: 12 },
+  title: { fontSize: 22, fontWeight: '800', color: colors.text },
+  subtitle: { fontSize: 14, color: colors.textMuted, marginTop: 2 },
+  offlineBox: { backgroundColor: 'rgba(249,115,22,0.08)', borderRadius: 16, borderWidth: 1, borderColor: 'rgba(249,115,22,0.30)', padding: 16, marginBottom: 12 },
+  offlineTitle: { fontSize: 14, fontWeight: '700', color: '#C2410C' },
   offlineRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 3 },
-  offlineId: { fontSize: 12, fontWeight: '700', color: '#1D4ED8', fontFamily: 'monospace' },
+  offlineId: { fontSize: 12, fontWeight: '700', color: colors.primary, fontFamily: 'monospace' },
   offlineConflict: { fontSize: 11, fontWeight: '600', color: '#C2410C', flex: 1, marginRight: 8 },
-  offlineAmt: { fontSize: 12, fontWeight: '700', color: '#1E293B' },
-  syncMsg: { fontSize: 12, fontWeight: '600', color: '#1E40AF', marginBottom: 6 },
-  syncBtn: { backgroundColor: '#1D4ED8', borderRadius: 8, paddingVertical: 8, alignItems: 'center', marginTop: 6 },
+  offlineAmt: { fontSize: 12, fontWeight: '700', color: colors.text },
+  syncMsg: { fontSize: 12, fontWeight: '600', color: '#C2410C', marginBottom: 6 },
+  syncBtn: { backgroundColor: colors.primary, borderRadius: 8, paddingVertical: 8, alignItems: 'center', marginTop: 6 },
   syncBtnText: { color: '#fff', fontWeight: '700', fontSize: 12 },
-  search: { borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 9, backgroundColor: '#fff', marginBottom: 12, fontSize: 14, color: '#1E293B' },
-  row: { flexDirection: 'row', backgroundColor: '#fff', borderRadius: 14, borderWidth: 1, borderColor: '#E2E8F0', padding: 12, marginBottom: 8 },
-  invoice: { fontWeight: '700', fontSize: 13, color: '#3B82F6', fontFamily: 'monospace' },
-  client: { fontSize: 13, color: '#1E293B', marginTop: 2 },
+  search: { borderWidth: 1, borderColor: colors.border, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 9, backgroundColor: colors.bgCard, marginBottom: 12, fontSize: 14, color: colors.text },
+  row: { flexDirection: 'row', backgroundColor: colors.bgCard, borderRadius: 14, borderWidth: 1, borderColor: colors.border, padding: 12, marginBottom: 8 },
+  invoice: { fontWeight: '700', fontSize: 13, color: colors.primary, fontFamily: 'monospace' },
+  client: { fontSize: 13, color: colors.text, marginTop: 2 },
   date: { fontSize: 11, color: colors.textMuted },
-  amount: { fontWeight: '800', fontSize: 15, color: '#1E293B' },
+  amount: { fontWeight: '800', fontSize: 15, color: colors.text },
   modalBg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  modalCard: { backgroundColor: '#fff', borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 20, maxHeight: '85%' },
-  modalTitle: { fontWeight: '800', fontSize: 16, marginBottom: 14, color: '#1E293B' },
-  receipt: { backgroundColor: '#F8FAFC', borderRadius: 12, padding: 14, marginBottom: 16 },
-  receiptCenter: { textAlign: 'center', fontWeight: '700', fontSize: 13, color: '#1E293B', marginBottom: 2, fontFamily: 'monospace' },
-  receiptLine: { fontSize: 12, color: '#1E293B', fontFamily: 'monospace', marginBottom: 2 },
+  modalCard: { backgroundColor: colors.bgCard, borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 20, maxHeight: '85%' },
+  modalTitle: { fontWeight: '800', fontSize: 16, marginBottom: 14, color: colors.text },
+  receipt: { backgroundColor: colors.bg, borderRadius: 12, padding: 14, marginBottom: 16 },
+  receiptCenter: { textAlign: 'center', fontWeight: '700', fontSize: 13, color: colors.text, marginBottom: 2, fontFamily: 'monospace' },
+  receiptLine: { fontSize: 12, color: colors.text, fontFamily: 'monospace', marginBottom: 2 },
   receiptDivider: { fontSize: 11, color: colors.textMuted, fontFamily: 'monospace', marginVertical: 4 },
   modalActions: { flexDirection: 'row', gap: 8, justifyContent: 'flex-end', marginTop: 8 },
-  btnPrimary: { backgroundColor: '#3B82F6', paddingVertical: 10, paddingHorizontal: 18, borderRadius: 8 },
-  btnSecondary: { backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#E2E8F0', paddingVertical: 10, paddingHorizontal: 14, borderRadius: 8 },
-  btnDanger: { backgroundColor: '#EF4444', paddingVertical: 10, paddingHorizontal: 14, borderRadius: 8 },
+  btnPrimary: { backgroundColor: colors.primary, paddingVertical: 10, paddingHorizontal: 18, borderRadius: 8 },
+  btnSecondary: { backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.border, paddingVertical: 10, paddingHorizontal: 14, borderRadius: 8 },
+  btnDanger: { backgroundColor: colors.danger, paddingVertical: 10, paddingHorizontal: 14, borderRadius: 8 },
   note: { fontSize: 12, color: colors.warningTextDark, backgroundColor: colors.warningBg, borderRadius: 8, padding: 8, marginBottom: 12 },
-  input: { borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 12, paddingHorizontal: 10, paddingVertical: 8, fontSize: 13, backgroundColor: '#F8FAFC', marginBottom: 10, color: '#1E293B' },
+  input: { borderWidth: 1, borderColor: colors.border, borderRadius: 12, paddingHorizontal: 10, paddingVertical: 8, fontSize: 13, backgroundColor: colors.bg, marginBottom: 10, color: colors.text },
   payRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
-  payBtn: { flex: 1, borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 12, paddingVertical: 8, alignItems: 'center' },
-  payBtnActive: { backgroundColor: '#3B82F6', borderColor: '#3B82F6' },
-  payBtnText: { fontSize: 12, fontWeight: '600', color: '#1E293B' },
+  payBtn: { flex: 1, borderWidth: 1, borderColor: colors.border, borderRadius: 12, paddingVertical: 8, alignItems: 'center' },
+  payBtnActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  payBtnText: { fontSize: 12, fontWeight: '600', color: colors.text },
 });
+
+// Estilos VIVOS: se reconstruyen cuando cambia el tema (dark mode).
+let __stylesVersion = -1;
+let __styles: ReturnType<typeof createStyles> | null = null;
+export const styles = new Proxy({} as ReturnType<typeof createStyles>, {
+  get(_t, prop) {
+    if (__stylesVersion !== themeRef.version || !__styles) {
+      __styles = createStyles();
+      __stylesVersion = themeRef.version;
+    }
+    return __styles[prop as keyof ReturnType<typeof createStyles>];
+  },
+});
+

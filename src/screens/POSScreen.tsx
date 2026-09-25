@@ -7,9 +7,10 @@ import { useFocusEffect } from '@react-navigation/native';
 import { LocationsAPI, SalesAPI, SettingsAPI, DiscountsAPI } from '../api/endpoints';
 import { useAuth } from '../context/AuthContext';
 import { useSync } from '../context/SyncContext';
-import { colors } from '../config/theme';
+import { colors, themeRef } from '../config/theme';
 import { PAY_METHODS, CURRENCY_SYMBOLS } from '../config/roles';
-import { EmptyState, ErrorBanner } from '../components/UI';
+import { EmptyState, ErrorBanner, Sel, Inp, Field } from '../components/UI';
+import Icon from '../components/Icon';
 import {
   cacheProducts, getOfflineProducts, saveSaleOffline,
 } from '../offline/offlineStore';
@@ -52,6 +53,9 @@ export default function POSScreen() {
   const [currencies, setCurrencies] = useState<string[]>(['CUP']);
   const [discounts, setDiscounts] = useState<any[]>([]);
   const [saleDiscountId, setSaleDiscountId] = useState('');
+  // Descuento por producto: un descuento por línea (productId → discountId),
+  // solo se envía en ventas online (el backend lo valida y aplica).
+  const [lineDiscounts, setLineDiscounts] = useState<Record<string, string>>({});
 
   const needsTransfer = payMethod === 'transferencia';
 
@@ -134,14 +138,36 @@ export default function POSScreen() {
     .map((p) => ({ product: p, qty: cart[p.id] }));
 
   const subtotal = cartItems.reduce((a, l) => a + l.qty * Number(l.product.price), 0);
-  // Descuento de tipo "venta": solo online (el flujo offline no lo soporta aún)
-  const activeSaleDiscount = discounts.find((d) => d.id === saleDiscountId) || null;
+  // ── Descuentos utilizables desde MI ubicación (el backend re-valida todo) ──
+  // activos, dentro de su vigencia y disponibles en esta location.
+  const usableDiscounts = discounts.filter((d) =>
+    d.active !== false &&
+    (!d.startsAt || new Date(d.startsAt) <= new Date()) &&
+    (!d.endsAt || new Date(d.endsAt) >= new Date()) &&
+    (d.locationScope !== 'seleccion' || (d.locationIds || []).includes(myLocationId))
+  );
+  const productDiscounts = usableDiscounts.filter((d) => d.scope === 'producto');
+  const findDisc = (id?: string | null) => (id ? usableDiscounts.find((x) => x.id === id) : undefined);
+  // ── Descuento por venta (al total) — solo online (offline no lo soporta) ──
+  const activeSaleDiscount = findDisc(saleDiscountId);
   const saleDiscAmount = online && activeSaleDiscount
-    ? (activeSaleDiscount.type === 'fixed'
+    ? (activeSaleDiscount.type === 'fijo'
       ? Math.min(Number(activeSaleDiscount.value), subtotal)
       : subtotal * Number(activeSaleDiscount.value) / 100)
     : 0;
-  const total = Math.max(0, subtotal - saleDiscAmount);
+  // ── Descuentos por producto (por línea, mismo cálculo que el backend) ──
+  const lineDiscount = (productId: string) => {
+    if (!online) return 0;
+    const d = findDisc(lineDiscounts[productId]);
+    if (!d) return 0;
+    const l = cartItems.find((x) => x.product.id === productId);
+    if (!l) return 0;
+    const base = l.qty * Number(l.product.price);
+    const amount = d.type === 'porcentaje' ? base * Number(d.value) / 100 : Number(d.value) * l.qty;
+    return Math.max(0, Math.min(amount, base));
+  };
+  const itemDiscountTotal = cartItems.reduce((a, l) => a + lineDiscount(l.product.id), 0);
+  const total = Math.max(0, subtotal - saleDiscAmount - itemDiscountTotal);
   const change = Number(cashGiven) - total;
   const curSym = CURRENCY_SYMBOLS[saleCurrency] || '$';
 
@@ -150,7 +176,7 @@ export default function POSScreen() {
       return Alert.alert('Carrito vacio', 'Agrega al menos un producto');
     }
     if (needsTransfer && (!clientName || !clientNit || !clientPhone)) {
-      return Alert.alert('Datos requeridos', 'Para transferencia completa nombre, NIT y telefono');
+      return Alert.alert('Datos requeridos', 'Para transferencia completa nombre, carnet y telefono');
     }
 
     setSaving(true);
@@ -166,6 +192,7 @@ export default function POSScreen() {
           qty: l.qty,
           price: Number(l.product.price),
           total: l.qty * Number(l.product.price),
+          discountId: online ? lineDiscounts[l.product.id] || undefined : undefined,
         })),
         subtotal,
         total,
@@ -196,6 +223,7 @@ export default function POSScreen() {
       }
 
       setCart({});
+      setLineDiscounts({});
       setClientName(''); setClientNit(''); setClientPhone(''); setCashGiven('');
       setSaleDiscountId('');
       load();
@@ -217,15 +245,20 @@ export default function POSScreen() {
         </View>
       )}
 
+      {/* Título + ubicación — igual que la web (h2 20/800 + sub 12) */}
+      <Text style={styles.pageTitle}>Punto de Venta</Text>
       {myLocationName ? (
         <Text style={styles.locationLabel}>Vendiendo desde: <Text style={styles.locationName}>{myLocationName}</Text></Text>
       ) : null}
 
-      {/* Buscador (también matchea barcode) */}
+      {/* Buscador fijo con icono + botón agregar (igual que la web) */}
       <View style={styles.searchWrap}>
+        <View style={{ position: 'absolute', left: 22, top: '50%', transform: [{ translateY: -8 }], zIndex: 1 }}>
+          <Icon name="search" size={15} color={colors.textMuted} />
+        </View>
         <TextInput
           style={styles.search}
-          placeholder="Buscar producto o código de barras..."
+          placeholder="Buscar producto o escanear..."
           placeholderTextColor={colors.textMuted}
           value={search}
           onChangeText={setSearch}
@@ -238,42 +271,60 @@ export default function POSScreen() {
             if (matches.length === 1) {
               setQty(matches[0], qtyFor(matches[0].id) + 1);
               setSearch('');
+            } else if (filtered.length === 1) {
+              setQty(filtered[0], qtyFor(filtered[0].id) + 1);
+              setSearch('');
             }
           }}
         />
+        <TouchableOpacity
+          style={styles.addUnique}
+          onPress={() => {
+            const q = search.trim().toLowerCase();
+            if (!q) return;
+            const matches = products.filter((p) =>
+              String((p as any).barcode || '').toLowerCase() === q || p.code.toLowerCase() === q);
+            const one = matches.length === 1 ? matches[0] : filtered.length === 1 ? filtered[0] : null;
+            if (one) { setQty(one, qtyFor(one.id) + 1); setSearch(''); }
+          }}
+        >
+          <Text style={styles.addUniqueText}>+</Text>
+        </TouchableOpacity>
       </View>
 
-      {/* Lista de productos scrollable */}
-      <FlatList
-        data={filtered}
-        keyExtractor={(p) => p.id}
-        style={styles.productList}
-        ListEmptyComponent={<EmptyState text="No hay productos disponibles" />}
-        renderItem={({ item: p }) => {
-          const q = qtyFor(p.id);
-          return (
-            <View style={styles.productRow}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.productName}>{p.name}</Text>
-                <Text style={styles.productSub}>Stock: {avail(p)} {p.unit} · {curSym}{fmt(Number(p.price))} {(p as any).currency || ''}</Text>
+      {/* Lista de productos — UNA tarjeta con separadores (igual que la web) */}
+      <View style={styles.listCard}>
+        <FlatList
+          data={filtered}
+          keyExtractor={(p) => p.id}
+          style={styles.productList}
+          ListEmptyComponent={<EmptyState text="No hay productos disponibles" />}
+          renderItem={({ item: p, index }) => {
+            const q = qtyFor(p.id);
+            return (
+              <View style={[styles.productRow, index > 0 && styles.productRowSep]}>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={styles.productName} numberOfLines={1}>{p.name}</Text>
+                  <Text style={styles.productSub}>Stock: {avail(p)} {p.unit} · {curSym}{fmt(Number(p.price))}</Text>
+                </View>
+                <View style={styles.qtyRow}>
+                  <TouchableOpacity
+                    style={[styles.qtyBtn, q === 0 && styles.qtyBtnDisabled]}
+                    onPress={() => setQty(p, q - 1)}
+                    disabled={q === 0}
+                  >
+                    <Icon name="minus" size={13} color={colors.text} />
+                  </TouchableOpacity>
+                  <Text style={[styles.qtyVal, q > 0 && { color: colors.primary }]}>{q}</Text>
+                  <TouchableOpacity style={styles.qtyBtnPlus} onPress={() => setQty(p, q + 1)}>
+                    <Icon name="plus" size={13} color="#ffffff" />
+                  </TouchableOpacity>
+                </View>
               </View>
-              <View style={styles.qtyRow}>
-                <TouchableOpacity
-                  style={[styles.qtyBtn, q === 0 && styles.qtyBtnDisabled]}
-                  onPress={() => setQty(p, q - 1)}
-                  disabled={q === 0}
-                >
-                  <Text style={styles.qtyBtnText}>−</Text>
-                </TouchableOpacity>
-                <Text style={[styles.qtyVal, q > 0 && { color: '#3B82F6' }]}>{q}</Text>
-                <TouchableOpacity style={styles.qtyBtnPlus} onPress={() => setQty(p, q + 1)}>
-                  <Text style={{ color: '#fff', fontSize: 18, fontWeight: '700' }}>+</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          );
-        }}
-      />
+            );
+          }}
+        />
+      </View>
 
       {/* Carrito fijo abajo */}
       <View style={styles.cartBox}>
@@ -285,109 +336,124 @@ export default function POSScreen() {
         </View>
 
         {cartItems.length > 0 && (
-          <ScrollView style={{ maxHeight: 80 }}>
-            {cartItems.map((l) => (
-              <View key={l.product.id} style={styles.cartLine}>
-                <Text style={styles.cartLineText}>{l.qty}x {l.product.name}</Text>
-                <Text style={styles.cartLineAmt}>${fmt(l.qty * Number(l.product.price))}</Text>
-              </View>
-            ))}
+          <ScrollView style={{ maxHeight: 110 }}>
+            {cartItems.map((l) => {
+              const ld = lineDiscount(l.product.id);
+              return (
+                <View key={l.product.id} style={styles.cartLine}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.cartLineText}>{l.qty}× {l.product.name}</Text>
+                    {online && productDiscounts.length > 0 && (
+                      <Sel
+                        style={{ alignSelf: 'flex-start', minWidth: 160, marginTop: 3 }}
+                        value={lineDiscounts[l.product.id] || ''}
+                        onValueChange={(v: string) => setLineDiscounts((prev) => { const next = { ...prev }; if (!v) delete next[l.product.id]; else next[l.product.id] = v; return next; })}
+                        items={[
+                          { label: 'Sin descuento', value: '' },
+                          ...productDiscounts.map((d) => ({
+                            label: `${d.code || d.name} (${d.type === 'porcentaje' ? `${d.value}%` : `${curSym}${d.value}/u`})`,
+                            value: d.id,
+                          })),
+                        ]}
+                      />
+                    )}
+                    {ld > 0 && <Text style={{ color: '#DC2626', fontSize: 11, marginTop: 2 }}>Descuento: -{curSym}{fmt(ld)}</Text>}
+                  </View>
+                  <Text style={styles.cartLineAmt}>{curSym}{fmt(l.qty * Number(l.product.price) - ld)}</Text>
+                </View>
+              );
+            })}
           </ScrollView>
         )}
 
-        {/* Moneda de la venta */}
-        {currencies.length > 1 && (
-          <View style={styles.payRow}>
-            {currencies.map((m) => (
-              <TouchableOpacity
-                key={m}
-                style={[styles.payBtn, saleCurrency === m && styles.payBtnActive]}
-                onPress={() => setSaleCurrency(m)}
-              >
-                <Text style={[styles.payBtnText, saleCurrency === m && { color: '#fff' }]}>{m}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        )}
-
-        {/* Metodo de pago */}
-        <View style={styles.payRow}>
-          {PAY_METHODS.map((m) => (
-            <TouchableOpacity
-              key={m.id}
-              style={[styles.payBtn, payMethod === m.id && styles.payBtnActive]}
-              onPress={() => setPayMethod(m.id)}
-            >
-              <Text style={[styles.payBtnText, payMethod === m.id && { color: '#fff' }]}>{m.label}</Text>
-            </TouchableOpacity>
-          ))}
+        {/* Moneda / Pago / Descuento / Efectivo — Fields con selects nativos,
+            idéntico al bloque de la web */}
+        <View style={styles.optsRow}>
+          {currencies.length > 0 && (
+            <Field label="Moneda">
+              <Sel
+                style={{ minWidth: 90 }}
+                value={saleCurrency}
+                onValueChange={setSaleCurrency}
+                items={currencies.map((m) => ({ label: m, value: m }))}
+              />
+            </Field>
+          )}
+          <Field label="Pago">
+            <Sel
+              style={{ minWidth: 130 }}
+              value={payMethod}
+              onValueChange={setPayMethod}
+              items={PAY_METHODS.map((m) => ({ label: m.label, value: m.id }))}
+            />
+          </Field>
+          {online && usableDiscounts.some((d) => d.scope === 'venta') && (
+            <Field label="Descuento">
+              <Sel
+                style={{ minWidth: 120 }}
+                value={saleDiscountId}
+                onValueChange={setSaleDiscountId}
+                items={[
+                  { label: '—', value: '' },
+                  ...usableDiscounts.filter((d) => d.scope === 'venta').map((d) => ({
+                    label: `${d.code || d.name} (${d.type === 'fijo' ? `-${d.value}` : `-${d.value}%`})`,
+                    value: d.id,
+                  })),
+                ]}
+              />
+            </Field>
+          )}
+          {payMethod === 'efectivo' && (
+            <Field label="Efectivo">
+              <Inp
+                style={{ width: 100, paddingVertical: 6, paddingHorizontal: 10, fontSize: 12 }}
+                value={cashGiven}
+                onChangeText={setCashGiven}
+                keyboardType="decimal-pad"
+                placeholder="0.00"
+              />
+            </Field>
+          )}
         </View>
 
-        {/* Descuento (solo online) */}
-        {online && discounts.filter((d) => d.scope === 'venta' && d.active !== false).length > 0 && (
-          <ScrollView horizontal style={{ marginBottom: 8 }} showsHorizontalScrollIndicator={false}>
-            <TouchableOpacity
-              style={[styles.payBtn, styles.discBtn, saleDiscountId === '' && styles.payBtnActive]}
-              onPress={() => setSaleDiscountId('')}
-            >
-              <Text style={[styles.payBtnText, saleDiscountId === '' && { color: '#fff' }]}>Sin descuento</Text>
-            </TouchableOpacity>
-            {discounts.filter((d) => d.scope === 'venta' && d.active !== false).map((d) => (
-              <TouchableOpacity
-                key={d.id}
-                style={[styles.payBtn, styles.discBtn, saleDiscountId === d.id && styles.payBtnActive]}
-                onPress={() => setSaleDiscountId(saleDiscountId === d.id ? '' : d.id)}
-              >
-                <Text style={[styles.payBtnText, saleDiscountId === d.id && { color: '#fff' }]}>
-                  {d.code || d.name} −{d.type === 'fixed' ? d.value : `${d.value}%`}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
+        {/* Cambio / descuentos — mismo orden y formato que la web */}
+        {payMethod === 'efectivo' && cashGiven && Number(cashGiven) >= total && (
+          <Text style={styles.changeText}>Cambio: {curSym}{fmt(change)} {saleCurrency}</Text>
+        )}
+        {saleDiscAmount > 0 && (
+          <View style={styles.discRow}>
+            <Text style={styles.discRowText}>Descuento:</Text>
+            <Text style={styles.discRowText}>-{curSym}{fmt(saleDiscAmount)}</Text>
+          </View>
+        )}
+        {itemDiscountTotal > 0 && (
+          <View style={styles.discRow}>
+            <Text style={styles.discRowText}>Descuento por producto:</Text>
+            <Text style={styles.discRowText}>-{curSym}{fmt(itemDiscountTotal)}</Text>
+          </View>
         )}
 
         {/* Datos de transferencia */}
         {needsTransfer && (
-          <View style={{ gap: 6, marginBottom: 8 }}>
-            <TextInput style={styles.input} placeholder="Nombre del cliente *" value={clientName} onChangeText={setClientName} placeholderTextColor={colors.textMuted} />
-            <View style={{ flexDirection: 'row', gap: 6 }}>
-              <TextInput style={[styles.input, { flex: 1, fontFamily: 'monospace' }]} placeholder="NIT *" value={clientNit} onChangeText={setClientNit} maxLength={11} keyboardType="numeric" placeholderTextColor={colors.textMuted} />
-              <TextInput style={[styles.input, { flex: 1 }]} placeholder="Telefono *" value={clientPhone} onChangeText={setClientPhone} keyboardType="phone-pad" placeholderTextColor={colors.textMuted} />
+          <View style={{ gap: 8 }}>
+            <Inp style={{ fontSize: 12 }} placeholder="Nombre del cliente *" value={clientName} onChangeText={setClientName} />
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              <Inp style={[{ flex: 1, fontSize: 12, fontFamily: 'monospace' }]} placeholder="Carnet *" value={clientNit} onChangeText={setClientNit} maxLength={11} keyboardType="numeric" />
+              <Inp style={[{ flex: 1, fontSize: 12 }]} placeholder="Teléfono *" value={clientPhone} onChangeText={setClientPhone} keyboardType="phone-pad" />
             </View>
           </View>
         )}
 
-        {/* Efectivo entregado */}
-        {payMethod === 'efectivo' && (
-          <TextInput
-            style={[styles.input, { marginBottom: 6 }]}
-            placeholder="Efectivo entregado"
-            value={cashGiven}
-            onChangeText={setCashGiven}
-            keyboardType="decimal-pad"
-            placeholderTextColor={colors.textMuted}
-          />
-        )}
-        {saleDiscAmount > 0 && (
-          <Text style={{ color: '#DC2626', fontWeight: '700', fontSize: 12, marginBottom: 4 }}>
-            Descuento: −{curSym}{fmt(saleDiscAmount)}
-          </Text>
-        )}
-        {payMethod === 'efectivo' && cashGiven && change >= 0 && (
-          <Text style={{ color: '#10B981', fontWeight: '700', fontSize: 13, marginBottom: 6 }}>
-            Cambio: {curSym}{fmt(change)}
-          </Text>
-        )}
-
-        {/* Total y cobrar */}
+        {/* Total y cobrar — botón VERDE con check (igual que la web) */}
         <View style={styles.footer}>
           <Text style={styles.total}>Total: {curSym}{fmt(total)} {saleCurrency}</Text>
           <TouchableOpacity
-            style={[styles.checkoutBtn, (saving || cartItems.length === 0) && { opacity: 0.5 }]}
+            style={[styles.checkoutBtn, (saving || cartItems.length === 0) && { opacity: 0.6 }]}
             onPress={checkout}
             disabled={saving || cartItems.length === 0}
           >
-            <Text style={styles.checkoutText}>{saving ? 'Procesando...' : online ? 'Cobrar' : 'Cobrar (offline)'}</Text>
+            <Icon name="check" size={15} color="#ffffff" />
+            <Text style={styles.checkoutText}>{saving ? '...' : online ? 'Cobrar' : 'Cobrar (offline)'}</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -395,40 +461,56 @@ export default function POSScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  wrap: { flex: 1, backgroundColor: '#F8FAFC' },
-  offlineBanner: { backgroundColor: '#7C3AED', padding: 8, alignItems: 'center' },
+const createStyles = () => StyleSheet.create({
+  wrap: { flex: 1, backgroundColor: colors.bg },
+  offlineBanner: { backgroundColor: '#1A5C8B', padding: 8, alignItems: 'center' },
   offlineText: { color: '#fff', fontSize: 12, fontWeight: '600' },
-  locationLabel: { paddingHorizontal: 12, paddingTop: 10, fontSize: 12, color: colors.textMuted },
+  pageTitle: { fontSize: 20, fontWeight: '800', color: colors.text, paddingHorizontal: 16, paddingTop: 12, marginBottom: 4 },
+  locationLabel: { paddingHorizontal: 16, fontSize: 12, color: colors.textMuted, marginBottom: 10 },
   locationName: { fontWeight: '700', color: colors.text },
-  searchWrap: { padding: 12, paddingBottom: 6 },
-  search: { borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 9, backgroundColor: '#fff', fontSize: 14, color: '#1E293B' },
-  productList: { flex: 1, paddingHorizontal: 12 },
-  productRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderRadius: 14, borderWidth: 1, borderColor: '#E2E8F0', padding: 12, marginBottom: 8 },
-  productName: { fontWeight: '700', fontSize: 14, color: '#1E293B' },
-  productSub: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
+  searchWrap: { paddingHorizontal: 16, marginBottom: 10 },
+  search: { borderWidth: 1, borderColor: colors.inputBorder, borderRadius: 12, paddingLeft: 34, paddingRight: 44, paddingVertical: 9, backgroundColor: colors.inputBg, fontSize: 14, color: colors.text },
+  addUnique: { position: 'absolute', right: 22, top: '50%', transform: [{ translateY: -14 }], backgroundColor: colors.primaryTint, borderRadius: 8, paddingVertical: 4, paddingHorizontal: 7 },
+  addUniqueText: { color: colors.primary, fontWeight: '800', fontSize: 13 },
+  listCard: { flex: 1, marginHorizontal: 16, marginBottom: 10, backgroundColor: colors.bgCard, borderRadius: 16, borderWidth: 1, borderColor: colors.border, overflow: 'hidden' },
+  productList: { flex: 1 },
+  productRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12, paddingHorizontal: 14 },
+  productRowSep: { borderTopWidth: 1, borderTopColor: colors.border },
+  productName: { fontWeight: '700', fontSize: 13, color: colors.text },
+  productSub: { fontSize: 11, color: colors.textMuted, marginTop: 1 },
   qtyRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  qtyBtn: { width: 28, height: 28, borderRadius: 7, backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#E2E8F0', alignItems: 'center', justifyContent: 'center' },
-  qtyBtnDisabled: { opacity: 0.35 },
-  qtyBtnText: { fontSize: 18, fontWeight: '700', color: '#1E293B' },
-  qtyBtnPlus: { width: 28, height: 28, borderRadius: 7, backgroundColor: '#3B82F6', alignItems: 'center', justifyContent: 'center' },
-  qtyVal: { width: 24, textAlign: 'center', fontSize: 15, fontWeight: '800', color: '#1E293B' },
-  cartBox: { backgroundColor: '#fff', borderTopWidth: 1, borderTopColor: '#E2E8F0', padding: 12 },
-  cartHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
-  cartTitle: { fontWeight: '700', fontSize: 15, color: '#1E293B' },
-  cartBadge: { backgroundColor: '#3B82F6', borderRadius: 20, paddingHorizontal: 8, paddingVertical: 1 },
+  qtyBtn: { width: 28, height: 28, borderRadius: 8, backgroundColor: colors.inputBg, alignItems: 'center', justifyContent: 'center' },
+  qtyBtnDisabled: { opacity: 0.4 },
+  qtyBtnPlus: { width: 28, height: 28, borderRadius: 8, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
+  qtyVal: { width: 22, textAlign: 'center', fontSize: 14, fontWeight: '700', color: colors.text },
+  cartBox: { backgroundColor: colors.bgCard, borderRadius: 16, borderWidth: 1, borderColor: colors.border, marginHorizontal: 16, marginBottom: 12, padding: 14, gap: 10 },
+  cartHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  cartTitle: { fontWeight: '700', fontSize: 14, color: colors.text },
+  cartBadge: { backgroundColor: colors.primary, borderRadius: 20, paddingHorizontal: 10, paddingVertical: 1, marginLeft: 'auto' },
   cartBadgeText: { color: '#fff', fontSize: 12, fontWeight: '700' },
-  cartLine: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 },
-  cartLineText: { fontSize: 12, color: '#1E293B' },
-  cartLineAmt: { fontSize: 12, fontWeight: '700', color: '#1E293B' },
-  payRow: { flexDirection: 'row', gap: 8, marginVertical: 8 },
-  payBtn: { flex: 1, borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 12, paddingVertical: 8, alignItems: 'center' },
-  discBtn: { flex: 0, paddingHorizontal: 12, marginRight: 6, minWidth: 90 },
-  payBtnActive: { backgroundColor: '#3B82F6', borderColor: '#3B82F6' },
-  payBtnText: { fontSize: 12, fontWeight: '600', color: '#1E293B' },
-  input: { borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 12, paddingHorizontal: 10, paddingVertical: 8, fontSize: 13, backgroundColor: '#F8FAFC', color: '#1E293B' },
-  footer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 6 },
-  total: { fontSize: 17, fontWeight: '800', color: '#1E293B' },
-  checkoutBtn: { backgroundColor: '#3B82F6', paddingVertical: 11, paddingHorizontal: 22, borderRadius: 10 },
+  cartLine: { flexDirection: 'row', justifyContent: 'space-between', borderBottomWidth: 1, borderBottomColor: colors.border, paddingBottom: 4, marginBottom: 4 },
+  cartLineText: { fontSize: 12, color: colors.text },
+  cartLineAmt: { fontSize: 12, fontWeight: '700', color: colors.text },
+  optsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, alignItems: 'flex-end' },
+  discRow: { flexDirection: 'row', justifyContent: 'space-between' },
+  discRowText: { fontSize: 12, color: '#DC2626' },
+  changeText: { fontSize: 13, fontWeight: '700', color: '#10B981' },
+  footer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 2 },
+  total: { fontSize: 18, fontWeight: '800', color: colors.text },
+  checkoutBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#10B981', paddingVertical: 10, paddingHorizontal: 20, borderRadius: 12 },
   checkoutText: { color: '#fff', fontWeight: '700', fontSize: 14 },
 });
+
+// Estilos VIVOS: se reconstruyen cuando cambia el tema (dark mode).
+let __stylesVersion = -1;
+let __styles: ReturnType<typeof createStyles> | null = null;
+export const styles = new Proxy({} as ReturnType<typeof createStyles>, {
+  get(_t, prop) {
+    if (__stylesVersion !== themeRef.version || !__styles) {
+      __styles = createStyles();
+      __stylesVersion = themeRef.version;
+    }
+    return __styles[prop as keyof ReturnType<typeof createStyles>];
+  },
+});
+
