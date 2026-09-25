@@ -183,6 +183,15 @@ export default function AppNavigator() {
   const perms = ROLES[user?.role || '']?.perms || [];
   const isDark = mode === 'dark';
 
+  // Reglas de Hooks: TODOS los hooks van antes de cualquier return temprano.
+  // Antes estos tres useState estaban DESPUÉS del `if (tabs.length === 0)`,
+  // así que un usuario sin módulos ("rol desconocido") montaba el componente
+  // con un número de hooks distinto al del resto → error de hooks en
+  // producción justo cuando se navega tras un cambio de rol.
+  const [planOpen, setPlanOpen] = useState(false);
+  const [legalDoc, setLegalDoc] = useState<'privacy' | 'terms' | null>(null);
+  const [tourOpen, setTourOpen] = useState(false);
+
   // Barra inferior: solo los 7 nav items de la web filtrados por permisos.
   const tabs = NAV_ITEMS.filter(n => perms.includes(n.key));
   // Screens de menú disponibles según rol (se registran ocultas para poder
@@ -210,9 +219,6 @@ export default function AppNavigator() {
     );
   }
 
-  const [planOpen, setPlanOpen] = useState(false);
-  const [legalDoc, setLegalDoc] = useState<'privacy' | 'terms' | null>(null);
-  const [tourOpen, setTourOpen] = useState(false);
   const trialInfo = getTrialBannerInfo(user);
 
   return (

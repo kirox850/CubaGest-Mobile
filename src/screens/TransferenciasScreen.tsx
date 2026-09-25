@@ -4,7 +4,7 @@ import {
   TouchableOpacity, Modal, Alert, ScrollView,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
-import { TransfersAPI, LocationsAPI, ProductsAPI } from '../api/endpoints';
+import { TransfersAPI, LocationsAPI } from '../api/endpoints';
 import { useAuth } from '../context/AuthContext';
 import { colors, themeRef } from '../config/theme';
 import { Badge, EmptyState, ErrorBanner } from '../components/UI';
@@ -36,6 +36,8 @@ export default function TransferenciasScreen() {
   const [modal, setModal] = useState(false);
   const [stockItems, setStockItems] = useState<LocationStockItem[]>([]);
   const [toLocationId, setToLocationId] = useState('');
+  // El admin no tiene ubicación propia: el backend exige fromLocationId.
+  const [fromLocationId, setFromLocationId] = useState('');
   const [selProductId, setSelProductId] = useState('');
   const [selQty, setSelQty] = useState('');
   const [selItems, setSelItems] = useState<{ productId: string; name: string; qty: number }[]>([]);
@@ -44,6 +46,31 @@ export default function TransferenciasScreen() {
   // Rechazo
   const [rejectTarget, setRejectTarget] = useState<Transfer | null>(null);
   const [rejectReason, setRejectReason] = useState('');
+
+  // Ubicación propia del usuario (la que el backend usa como origen cuando no
+  // se manda fromLocationId: almacenista → almacén, cajero → su caja).
+  const ownLocationId = (locs: Location[]): string => {
+    if (user?.role === 'almacenista') return locs.find((l) => l.type === 'almacen')?.id || '';
+    if (user?.role === 'cajero') return locs.find((l) => l.type === 'caja' && l.ownerUserId === user?.id)?.id || '';
+    return '';
+  };
+
+  // ── Permisos de resolución (el backend manda) ─────────────────────────────
+  // canResolveTransfer: solo el dueño del DESTINO resuelve (almacenista si el
+  // destino es un almacén, cajero si es su caja). El admin NO puede.
+  // Cada envío llega con canResolve/canCancel ya resueltos por el servidor; el
+  // cálculo local solo se usa si el backend no los manda (respuestas viejas).
+  const canResolve = (t: Transfer): boolean => {
+    if (typeof t.canResolve === 'boolean') return t.canResolve;
+    const dest = locations.find((l) => l.id === t.toLocationId);
+    if (!dest || dest.active === false) return false;
+    if (user?.role === 'almacenista') return dest.type === 'almacen';
+    if (user?.role === 'cajero') return dest.type === 'caja' && dest.ownerUserId === user?.id;
+    return false;
+  };
+  // Cancelar: quien creó el envío, o el admin (cualquier otro recibe 403).
+  const canCancel = (t: Transfer): boolean =>
+    typeof t.canCancel === 'boolean' ? t.canCancel : user?.role === 'admin' || t.requestedById === user?.id;
 
   const load = useCallback(async () => {
     try {
@@ -68,23 +95,24 @@ export default function TransferenciasScreen() {
   const pending = transfers.filter((t) => t.status === 'pendiente');
   const visible = tab === 'pendientes' ? pending : transfers;
 
+  // Carga el stock de la ubicación de ORIGEN elegida (admin) o propia.
+  const loadSourceStock = async (sourceId: string) => {
+    if (!sourceId) {
+      setStockItems([]);
+      return;
+    }
+    const { items } = await LocationsAPI.stock(sourceId);
+    setStockItems(items.filter((p) => p.stock > 0));
+  };
+
   const openNew = async () => {
     try {
-      // El origen del envío lo decide el backend (ubicación propia del
-      // usuario). Aquí solo elegimos destino y productos de MI stock.
       const locs = locations.length ? locations : await LocationsAPI.list();
-      let ownId = '';
-      if (user?.role === 'almacenista') ownId = locs.find((l) => l.type === 'almacen')?.id || '';
-      else if (user?.role === 'cajero') ownId = locs.find((l) => l.type === 'caja' && l.ownerUserId === user?.id)?.id || '';
-      else if (isAdmin) ownId = locs.find((l) => l.type === 'almacen')?.id || locs[0]?.id || '';
-
-      if (ownId) {
-        const { items } = await LocationsAPI.stock(ownId);
-        setStockItems(items.filter((p) => p.stock > 0));
-      } else {
-        const list = await ProductsAPI.list();
-        setStockItems(list as any);
-      }
+      setLocations(locs);
+      const own = ownLocationId(locs);
+      const source = isAdmin ? '' : own;
+      setFromLocationId(source);
+      if (!isAdmin) await loadSourceStock(own);
       setSelItems([]);
       setSelProductId('');
       setSelQty('');
@@ -107,11 +135,14 @@ export default function TransferenciasScreen() {
   };
 
   const createTransfer = async () => {
+    if (isAdmin && !fromLocationId) return Alert.alert('Error', 'Seleccione la ubicación de origen');
     if (!toLocationId) return Alert.alert('Error', 'Seleccione ubicación de destino');
     if (selItems.length === 0) return Alert.alert('Error', 'Agregue al menos un producto');
     setSaving(true);
     try {
       await TransfersAPI.create({
+        // El admin debe indicar el origen; los demás roles usan el suyo.
+        fromLocationId: isAdmin ? fromLocationId : undefined,
         toLocationId,
         items: selItems.map((i) => ({ productId: i.productId, qty: i.qty })),
         notes: notes || undefined,
@@ -201,9 +232,11 @@ export default function TransferenciasScreen() {
         }
         renderItem={({ item: t }) => {
           const st = STATUS_BADGE[t.status] || { label: t.status, color: colors.textMuted };
-          // Mostramos las acciones siempre en pendientes: el backend valida
-          // de verdad quién puede aprobar (dueño del destino) y responde 403.
-          const canApprove = t.status === 'pendiente';
+          // Solo se muestran las acciones que el backend acepta para este
+          // usuario: antes se mostraban siempre y el usuario recibía un 403
+          // ("Solo quien recibe puede aprobar") sin saber por qué.
+          const showApprove = t.status === 'pendiente' && canResolve(t);
+          const showCancel = t.status === 'pendiente' && canCancel(t);
           return (
             <View style={styles.card}>
               <View style={styles.cardTop}>
@@ -219,19 +252,23 @@ export default function TransferenciasScreen() {
                 <Text key={i.id} style={styles.itemLine}>• {i.qty} {i.unit} — {i.productName}</Text>
               ))}
 
-              {t.status === 'pendiente' && (
+              {t.status === 'pendiente' && (showApprove || showCancel) && (
                 <View style={styles.actionsRow}>
-                  {canApprove && (
+                  {showApprove && (
                     <TouchableOpacity style={styles.btnApprove} onPress={() => approve(t)}>
                       <Text style={styles.btnApproveText}>Aprobar</Text>
                     </TouchableOpacity>
                   )}
-                  <TouchableOpacity style={styles.btnReject} onPress={() => setRejectTarget(t)}>
-                    <Text style={styles.btnRejectText}>Rechazar</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.btnCancel} onPress={() => cancel(t)}>
-                    <Text style={styles.btnCancelText}>Cancelar</Text>
-                  </TouchableOpacity>
+                  {showApprove && (
+                    <TouchableOpacity style={styles.btnReject} onPress={() => setRejectTarget(t)}>
+                      <Text style={styles.btnRejectText}>Rechazar</Text>
+                    </TouchableOpacity>
+                  )}
+                  {showCancel && (
+                    <TouchableOpacity style={styles.btnCancel} onPress={() => cancel(t)}>
+                      <Text style={styles.btnCancelText}>Cancelar</Text>
+                    </TouchableOpacity>
+                  )}
                 </View>
               )}
             </View>
@@ -246,11 +283,40 @@ export default function TransferenciasScreen() {
             <Text style={styles.modalTitle}>Nuevo envío</Text>
             <Text style={styles.hint}>El stock sigue en su ubicación hasta que el destino apruebe.</Text>
 
+            {/* Origen: solo el admin lo elige (los demás roles usan su propia
+                ubicación y el backend la resuelve solo). */}
+            {isAdmin && (
+              <>
+                <Text style={styles.fieldLabel}>Origen *</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
+                  <View style={{ flexDirection: 'row', gap: 6 }}>
+                    {locations
+                      .filter((l) => l.active !== false)
+                      .map((l) => (
+                        <TouchableOpacity
+                          key={l.id}
+                          style={[styles.chip, fromLocationId === l.id && styles.chipActive]}
+                          onPress={() => {
+                            setFromLocationId(l.id);
+                            setSelItems([]);
+                            loadSourceStock(l.id).catch((e) =>
+                              Alert.alert('Error', (e as Error).message),
+                            );
+                          }}
+                        >
+                          <Text style={[styles.chipText, fromLocationId === l.id && { color: '#fff' }]}>{l.name}</Text>
+                        </TouchableOpacity>
+                      ))}
+                  </View>
+                </ScrollView>
+              </>
+            )}
+
             <Text style={styles.fieldLabel}>Destino *</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
               <View style={{ flexDirection: 'row', gap: 6 }}>
                 {locations
-                  .filter((l) => l.id !== '')
+                  .filter((l) => l.active !== false && l.id !== (isAdmin ? fromLocationId : ownLocationId(locations)))
                   .map((l) => (
                     <TouchableOpacity
                       key={l.id}
@@ -266,6 +332,13 @@ export default function TransferenciasScreen() {
             <Text style={styles.fieldLabel}>Productos</Text>
             <View style={{ flexDirection: 'row', gap: 6, marginBottom: 8 }}>
               <ScrollView style={{ flex: 1, maxHeight: 120 }}>
+                {stockItems.length === 0 && (
+                  <Text style={styles.hint}>
+                    {isAdmin
+                      ? 'Elija la ubicación de origen para ver su stock.'
+                      : 'No hay stock disponible en su ubicación.'}
+                  </Text>
+                )}
                 {stockItems.map((p) => (
                   <TouchableOpacity
                     key={p.id}

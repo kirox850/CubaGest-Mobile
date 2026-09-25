@@ -1,11 +1,10 @@
 import React, { useCallback, useState } from 'react';
-import { View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, Modal, Alert } from 'react-native';
+import { View, Text, StyleSheet, FlatList, Modal, Alert, Share } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
-import { UsersAPI } from '../api/endpoints';
+import { UsersAPI, type UserActivation } from '../api/endpoints';
 import { ROLES } from '../config/roles';
 import { colors, themeRef } from '../config/theme';
 import { Badge, EmptyState, ErrorBanner, Btn, Inp, Sel } from '../components/UI';
-import Icon from '../components/Icon';
 import type { User } from '../types';
 
 export default function UsuariosScreen() {
@@ -18,11 +17,10 @@ export default function UsuariosScreen() {
   const [editTarget, setEditTarget] = useState<User | null>(null);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
   const [role, setRole] = useState<User['role']>('cajero');
 
-  // Modal link de activación
-  const [linkInfo, setLinkInfo] = useState<{ name: string; link?: string } | null>(null);
+  // Modal link de activación (setPasswordUrl / emailSent del backend)
+  const [linkInfo, setLinkInfo] = useState<(UserActivation & { name: string }) | null>(null);
   const [resendingId, setResendingId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -39,7 +37,7 @@ export default function UsuariosScreen() {
 
   const openNew = () => {
     setEditTarget(null);
-    setName(''); setEmail(''); setPassword(''); setRole('cajero');
+    setName(''); setEmail(''); setRole('cajero');
     setModal(true);
   };
 
@@ -47,24 +45,29 @@ export default function UsuariosScreen() {
     setEditTarget(u);
     setName(u.name);
     setEmail(u.email);
-    setPassword('');
     setRole(u.role);
     setModal(true);
   };
 
   const save = async () => {
     if (!name || !email) return Alert.alert('Faltan datos', 'Complete nombre y correo');
-    if (!editTarget && !password) return Alert.alert('Faltan datos', 'Defina una contraseña inicial');
     setSaving(true);
     try {
       if (editTarget) {
         await UsersAPI.update(editTarget.id, { name, role });
         Alert.alert('✓', 'Usuario actualizado');
+        setModal(false);
       } else {
-        await UsersAPI.create({ name, email, password, role });
-        Alert.alert('✓', 'Usuario creado');
+        // El backend NO recibe contraseña: el usuario la elige con el link que
+        // le llega al correo. El admin solo lo comparte si el correo no llega.
+        const created = await UsersAPI.create({ name, email, role });
+        setModal(false);
+        setLinkInfo({
+          name,
+          setPasswordUrl: created?.setPasswordUrl,
+          emailSent: created?.emailSent,
+        });
       }
-      setModal(false);
       load();
     } catch (err) {
       Alert.alert('Error', (err as Error).message);
@@ -77,11 +80,23 @@ export default function UsuariosScreen() {
     setResendingId(u.id);
     try {
       const res = await UsersAPI.resendSetPassword(u.id);
-      setLinkInfo({ name: u.name, link: (res as any)?.link });
+      setLinkInfo({ name: u.name, setPasswordUrl: res?.setPasswordUrl, emailSent: res?.emailSent });
     } catch (err) {
       Alert.alert('Error', (err as Error).message);
     } finally {
       setResendingId(null);
+    }
+  };
+
+  const copyLink = async () => {
+    const link = linkInfo?.setPasswordUrl;
+    if (!link) return;
+    // Sin dependencias extra: el texto es seleccionable y el hoja de
+    // compartir del sistema permite copiarlo sin instalar nada.
+    try {
+      await Share.share({ message: link, title: 'Link para establecer contraseña' });
+    } catch {
+      Alert.alert('Link de activación', link);
     }
   };
 
@@ -148,7 +163,9 @@ export default function UsuariosScreen() {
             <Text style={styles.modalTitle}>{editTarget ? 'Editar Usuario' : 'Nuevo Usuario'}</Text>
             {!editTarget && (
               <Text style={styles.hint}>
-                No se pide contraseña acá — apenas crees la cuenta, le llega un correo al usuario para que la elija él mismo.
+                No se pide contraseña acá — al crear la cuenta, el sistema envía un link al
+                correo del usuario para que elija su propia clave. Si el correo no llega, se
+                puede compartir el link que aparece al final.
               </Text>
             )}
             <Inp style={{ marginBottom: 10 }} placeholder="Nombre completo" value={name} onChangeText={setName} />
@@ -182,19 +199,28 @@ export default function UsuariosScreen() {
         </View>
       </Modal>
 
-      {/* Modal link para establecer contraseña */}
+      {/* Modal link para establecer contraseña (setPasswordUrl / emailSent) */}
       <Modal visible={!!linkInfo} transparent animationType="fade" onRequestClose={() => setLinkInfo(null)}>
         <View style={styles.modalBg}>
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>Link para {linkInfo?.name}</Text>
             <Text style={styles.hint}>
-              Se envió un link al correo del usuario para que establezca su contraseña.
+              {linkInfo?.emailSent
+                ? 'Se envió un link al correo del usuario para que establezca su contraseña.'
+                : 'No se pudo enviar el correo (revisa que la dirección sea válida). Comparta este link con el usuario para que establezca su contraseña.'}
             </Text>
-            {linkInfo?.link ? (
-              <Text style={styles.linkBox} selectable>{linkInfo.link}</Text>
-            ) : null}
+            {linkInfo?.setPasswordUrl ? (
+              <Text style={styles.linkBox} selectable>{linkInfo.setPasswordUrl}</Text>
+            ) : (
+              <Text style={styles.hint}>
+                El backend no devolvió el link. Use "🔗 Link" de nuevo para reenviarlo.
+              </Text>
+            )}
             <View style={styles.modalActions}>
               <Btn variant="secondary" label="Cerrar" onPress={() => setLinkInfo(null)} />
+              {linkInfo?.setPasswordUrl ? (
+                <Btn label="Compartir / copiar" onPress={copyLink} />
+              ) : null}
             </View>
           </View>
         </View>

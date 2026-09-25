@@ -1,7 +1,6 @@
 import { apiFetch } from './client';
-import { getRefreshToken } from './client';
 import type {
-  AuthResponse, RefreshResponse, User, Product, Sale, Expense, PlanInfo,
+  AuthResponse, User, Product, Sale, Expense, PlanInfo,
   DashboardSummary, Location, LocationStock, Closing, InventoryReading,
   ClosingPreview, Transfer, AuditLog, AccountingSummary, IncomeRow,
 } from '../types';
@@ -18,17 +17,16 @@ export const AuthAPI = {
     const res = await apiFetch<any>('/auth/me');
     return (res?.user ?? res) as User;
   },
+  // El registro actual del backend devuelve un único `token` (sin
+  // refreshToken) y el usuario. Aceptamos ambos nombres para no romper
+  // ninguna de las dos formas mientras el backend se estandariza.
   register: (data: { companyName: string; companyNit?: string; name: string; email: string; password: string; referralCode?: string }): Promise<AuthResponse> =>
     apiFetch('/auth/register', { method: 'POST', body: data, auth: false }),
   forgotPassword: (email: string): Promise<{ message: string }> =>
     apiFetch('/auth/forgot-password', { method: 'POST', body: { email }, auth: false }),
-  // El backend exige el refreshToken en el body — antes no se mandaba nada
-  // y esta llamada siempre fallaba con 400.
-  refresh: async (): Promise<RefreshResponse> => {
-    const refreshToken = await getRefreshToken();
-    if (!refreshToken) throw new Error('No hay refresh token guardado');
-    return apiFetch('/auth/refresh', { method: 'POST', body: { refreshToken }, auth: false });
-  },
+  // La renovación silenciosa NO vive aquí: la controla src/api/session.ts
+  // (un solo refresh en vuelo para toda la app + reglas de "nunca cierres la
+  // sesión por un fallo de red"). El cliente HTTP la invoca en cada 401.
 };
 
 // ─── Planes y suscripción ─────────────────────────────────────────────────────
@@ -41,10 +39,11 @@ export const SubscriptionAPI = {
   status: (): Promise<unknown> => apiFetch('/subscription/status'),
   authorizeQvapay: (plan: string): Promise<{ url?: string }> =>
     apiFetch('/subscription/authorize', { method: 'POST', body: { plan } }),
-  // Cancela la renovación automática. La empresa sigue en su plan actual
-  // hasta que venza el período ya pagado (planExpiry) y ahí cae a free.
-  cancel: (): Promise<{ message: string; planExpiry?: string }> =>
-    apiFetch('/subscription/cancel', { method: 'DELETE' }),
+  // NO hay `cancel`: el backend expone /status, /, /whatsapp, /authorize y
+  // /qvapay-callback — no existe DELETE /subscription/cancel. Antes había aquí
+  // un stub que apuntaba a una ruta inexistente (cualquier botón que lo
+  // usara recibiría 404). El plan es explícito: la UI de cancelación se añade
+  // SOLO cuando exista la ruta; mientras tanto se gestiona con soporte.
 };
 
 export const LocationsAPI = {
@@ -104,17 +103,22 @@ export const ProductsAPI = {
     apiFetch(`/products/${id}/reactivate`, { method: 'POST' }),
 };
 
+// ─── Sales ──────────────────────────────────────────────────────────────────
+// El cliente manda `clientSaleId` (UUID del dispositivo) y `locationId` para
+// que un reintento no duplique la factura y la venta quede anclada a la
+// ubicación desde la que se hizo. El backend es la autoridad de precios,
+// stock e impuestos: la app solo envía cantidades y preferencias.
 export const SalesAPI = {
   list: (params: Record<string, string> = {}): Promise<Sale[]> => {
     const qs = new URLSearchParams(params).toString();
     return apiFetch(`/sales${qs ? `?${qs}` : ''}`);
   },
-  create: (sale: Partial<Sale>): Promise<Sale> =>
+  create: (sale: Partial<Sale> & { clientSaleId?: string; locationId?: string }): Promise<Sale> =>
     apiFetch('/sales', { method: 'POST', body: sale as Record<string, unknown> }),
   update: (id: string, data: Partial<Sale>): Promise<Sale> =>
     apiFetch(`/sales/${id}`, { method: 'PUT', body: data as Record<string, unknown> }),
   voidSale: (id: string): Promise<unknown> => apiFetch(`/sales/${id}/void`, { method: 'POST' }),
-  sync: (sales: Partial<Sale>[]): Promise<unknown> =>
+  sync: (sales: Record<string, unknown>[]): Promise<unknown> =>
     apiFetch('/sales/sync', { method: 'POST', body: { sales } }),
 };
 
@@ -139,14 +143,25 @@ export const ExpensesAPI = {
   remove: (id: string): Promise<unknown> => apiFetch(`/accounting/expenses/${id}`, { method: 'DELETE' }),
 };
 
+// ─── Usuarios (activación por link) ─────────────────────────────────────────
+// Contrato verificado contra el backend:
+//  - POST /users NO recibe contraseña: el admin no escribe la clave de nadie.
+//    La respuesta trae `setPasswordUrl` (respaldo para compartir a mano si el
+//    correo no llega) y `emailSent` (si el backend pudo enviarlo).
+//  - POST /users/:id/resend-set-password devuelve { setPasswordUrl, emailSent }.
+export interface UserActivation {
+  setPasswordUrl?: string;
+  emailSent?: boolean;
+}
+
 export const UsersAPI = {
   list: (): Promise<User[]> => apiFetch('/users'),
-  create: (user: Partial<User> & { password: string }): Promise<User> =>
+  create: (user: { name: string; email: string; role: string; nit?: string }): Promise<User & UserActivation> =>
     apiFetch('/users', { method: 'POST', body: user as Record<string, unknown> }),
   update: (id: string, user: Partial<User>): Promise<User> =>
     apiFetch(`/users/${id}`, { method: 'PUT', body: user as Record<string, unknown> }),
   remove: (id: string): Promise<unknown> => apiFetch(`/users/${id}`, { method: 'DELETE' }),
-  resendSetPassword: (id: string): Promise<{ link?: string; email?: string }> =>
+  resendSetPassword: (id: string): Promise<UserActivation> =>
     apiFetch(`/users/${id}/resend-set-password`, { method: 'POST' }),
 };
 
@@ -162,12 +177,24 @@ export const ClosingAPI = {
     apiFetch('/closing/confirm', { method: 'POST', body }),
 };
 
+// ─── Transferencias ─────────────────────────────────────────────────────────
+// Reglas verificadas en el backend (src/routes/transfers.ts):
+//  - POST /transfers: el admin DEBE mandar `fromLocationId` (no tiene
+//    ubicación propia); cajero/almacenista usan su ubicación y no la mandan.
+//  - approve/reject: solo quien RECIBE (almacenista si el destino es un
+//    almacén; cajero si el destino es su caja). El admin no puede resolver.
+//  - cancel: quien creó el envío, o el admin.
 export const TransfersAPI = {
   list: (params: Record<string, string> = {}): Promise<Transfer[]> => {
     const qs = new URLSearchParams(params).toString();
     return apiFetch(`/transfers${qs ? `?${qs}` : ''}`);
   },
-  create: (body: { toLocationId: string; items: { productId: string; qty: number }[]; notes?: string }): Promise<Transfer> =>
+  create: (body: {
+    toLocationId: string;
+    items: { productId: string; qty: number }[];
+    notes?: string;
+    fromLocationId?: string;
+  }): Promise<Transfer> =>
     apiFetch('/transfers', { method: 'POST', body }),
   approve: (id: string): Promise<unknown> => apiFetch(`/transfers/${id}/approve`, { method: 'POST' }),
   reject: (id: string, reason?: string): Promise<unknown> =>

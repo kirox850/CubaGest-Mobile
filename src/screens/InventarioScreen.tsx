@@ -81,7 +81,8 @@ export default function InventarioScreen() {
       setProducts(items);
       // Cache offline: guardamos el stock de la ubicación operativa del
       // usuario (cajero/almacenista), igual que hace la web para el POS.
-      if (user?.role !== 'admin') await cacheProducts(items);
+      // Va al namespace de ESA ubicación, no al de otra caja.
+      if (user?.role !== 'admin') await cacheProducts(items, selectedLocId);
       setLoading(false);
     } catch (err) {
       setError((err as Error).message);

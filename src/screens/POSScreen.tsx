@@ -14,6 +14,9 @@ import Icon from '../components/Icon';
 import {
   cacheProducts, getOfflineProducts, saveSaleOffline,
 } from '../offline/offlineStore';
+import { activateNamespace, getActiveNamespace, UNKNOWN_LOCATION } from '../offline/namespace';
+import { generateUuid } from '../utils/uuid';
+import type { Location } from '../types';
 
 const fmt = (n: number) => Number(n || 0).toFixed(2);
 
@@ -36,9 +39,12 @@ type PosProduct = {
 export default function POSScreen() {
   const { user, online } = useAuth();
   const { refresh: refreshSync, pendingCount } = useSync();
+  // Aviso único: se venderó sin conexión sin ubicación conocida en el teléfono.
+  const warnedUnknownLocation = React.useRef(false);
   const [products, setProducts] = useState<PosProduct[]>([]);
   const [myLocationId, setMyLocationId] = useState('');
   const [myLocationName, setMyLocationName] = useState('');
+  const [locations, setLocations] = useState<Location[]>([]);
   const [search, setSearch] = useState('');
   const [cart, setCart] = useState<Record<string, number>>({});
   const [payMethod, setPayMethod] = useState('efectivo');
@@ -58,6 +64,9 @@ export default function POSScreen() {
   const [lineDiscounts, setLineDiscounts] = useState<Record<string, string>>({});
 
   const needsTransfer = payMethod === 'transferencia';
+  // El admin no tiene ubicación propia: el backend exige que indique en cuál
+  // vende (locationId explícito), así que la app le deja elegirla.
+  const needsLocationPicker = user?.role === 'admin';
 
   // Config de empresa (monedas habilitadas) y descuentos disponibles
   React.useEffect(() => {
@@ -73,7 +82,9 @@ export default function POSScreen() {
 
   // ── Carga: online usa stock de MI ubicación (igual que la web); offline
   //    cae al cache local automáticamente.
-  const load = useCallback(async () => {
+  //    La lista de ubicaciones NO se vuelve a pedir en cada venta: se resuelve
+  //    una vez y se refresca solo el stock, que es lo único que cambia.
+  const load = useCallback(async (opts: { forceLocation?: boolean; locationId?: string } = {}) => {
     setError('');
     if (!online) {
       const cached = await getOfflineProducts();
@@ -81,19 +92,47 @@ export default function POSScreen() {
       return;
     }
     try {
-      const locs = await LocationsAPI.list();
-      const own = user?.role === 'almacenista'
-        ? locs.find((l) => l.type === 'almacen')
-        : locs.find((l) => l.type === 'caja' && l.ownerUserId === user?.id);
-      if (!own) {
+      // La ubicación indicada por el llamador manda: setMyLocationId es
+      // asíncrono, así que leer `myLocationId` aquí seguiría viendo el valor
+      // anterior y el admin acabaría viendo el stock de la caja equivocada.
+      let locationId = opts.locationId || myLocationId;
+
+      if (!locationId || opts.forceLocation) {
+        const locs = locations.length ? locations : await LocationsAPI.list();
+        // Solo guardamos la lista la primera vez: volver a setear un array
+        // nuevo en cada carga recrearía `load` y dispararía el efecto de foco
+        // otra vez (bucle de peticiones al servidor).
+        if (!locations.length) setLocations(locs);
+        const own = opts.locationId
+          ? locs.find((l) => l.id === opts.locationId)
+          : needsLocationPicker
+            ? locs.find((l) => l.id === myLocationId)
+            : user?.role === 'almacenista'
+              ? locs.find((l) => l.type === 'almacen')
+              : locs.find((l) => l.type === 'caja' && l.ownerUserId === user?.id);
+        if (own) {
+          locationId = own.id;
+          setMyLocationId(own.id);
+          setMyLocationName(own.name);
+        }
+      }
+
+      if (!locationId) {
         setProducts([]);
-        setError('No tiene una ubicación asignada para vender. Contacte al administrador.');
+        setError(
+          needsLocationPicker
+            ? 'Elija la ubicación desde la que va a vender.'
+            : 'No tiene una ubicación asignada para vender. Contacte al administrador.',
+        );
         return;
       }
-      setMyLocationId(own.id);
-      setMyLocationName(own.name);
-      const { items } = await LocationsAPI.stock(own.id);
-      await cacheProducts(items);
+
+      // Namespace offline = cuenta + ubicación. A partir de aquí, catálogo y
+      // cola pertenecen a ESTA caja/almacén (nunca se mezclan entre cuentas).
+      await activateNamespace(user, locationId);
+
+      const { items } = await LocationsAPI.stock(locationId);
+      await cacheProducts(items, locationId);
       setProducts(items.filter((p: any) => p.active && p.stock > 0));
     } catch (err) {
       // Falló la red/permisos: caemos al cache offline sin bloquear la venta.
@@ -105,9 +144,28 @@ export default function POSScreen() {
         setError((err as Error).message);
       }
     }
-  }, [online, user?.id, user?.role]);
+  }, [online, user, myLocationId, locations, needsLocationPicker]);
+
+  // Al abrir la pantalla sin conexión reabrimos el namespace de la última
+  // ubicación conocida, para que la cola de esa caja siga visible.
+  React.useEffect(() => {
+    if (user) void activateNamespace(user, myLocationId || undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
+
+  const selectLocation = (id: string) => {
+    if (!id || id === myLocationId) return;
+    const loc = locations.find((l) => l.id === id);
+    setMyLocationId(id);
+    if (loc) setMyLocationName(loc.name);
+    setCart({});
+    setLineDiscounts({});
+    // Se pasa la ubicación explícitamente: dentro de `load` el estado todavía
+    // es el anterior y buscaría el stock de la caja que acabamos de dejar.
+    load({ forceLocation: true, locationId: id });
+  };
 
   const filtered = products.filter((p) => {
     const q = search.trim().toLowerCase();
@@ -178,10 +236,20 @@ export default function POSScreen() {
     if (needsTransfer && (!clientName || !clientNit || !clientPhone)) {
       return Alert.alert('Datos requeridos', 'Para transferencia completa nombre, carnet y telefono');
     }
+    if (online && needsLocationPicker && !myLocationId) {
+      return Alert.alert('Ubicación requerida', 'Elija la ubicación desde la que va a vender');
+    }
 
     setSaving(true);
     try {
+      // clientSaleId (UUID del dispositivo) + locationId viajan SIEMPRE, online
+      // y offline: son la idempotencia de la venta y su anclaje a la
+      // ubicación. Si el POST se pierde y se reintenta, el backend devuelve la
+      // factura original en lugar de facturar dos veces.
+      const clientSaleId = generateUuid();
       const saleData = {
+        clientSaleId,
+        locationId: myLocationId || undefined,
         clientName: needsTransfer ? clientName : 'Consumidor Final',
         clientNit: needsTransfer ? clientNit : '00000000000',
         clientPhone: needsTransfer ? clientPhone : undefined,
@@ -202,21 +270,43 @@ export default function POSScreen() {
 
       let receiptId: string;
       if (!online) {
+        // Sin namespace activo no hay dónde encolar la venta: se activa aquí
+        // con la ubicación de esta pantalla (nunca se escribe fuera de una
+        // cuenta ni fuera de su caja/almacén).
+        if (!getActiveNamespace()) await activateNamespace(user, myLocationId);
+
         // ── Venta OFFLINE: va a la cola local y sincroniza sola después.
         const offline = await saveSaleOffline(saleData);
         receiptId = offline.localId;
+
+        // Si el usuario nunca ha vendido con red en este teléfono, aún no
+        // conocemos su ubicación: la venta se guarda igual (el servidor la
+        // atribuye a la ubicación del usuario al sincronizar), pero el stock
+        // local queda en un namespace "sin ubicación" hasta que se resuelva.
+        // Avisamos UNA vez para que el cajero lo sepa en vez de vender a ciegas.
+        if (offline.locationId === UNKNOWN_LOCATION && !warnedUnknownLocation.current) {
+          warnedUnknownLocation.current = true;
+          setError(
+            'Vendiendo sin conexión sin ubicación registrada en este teléfono: ' +
+            'las ventas se guardan y se sincronizarán cuando vuelva la señal.',
+          );
+        }
+
         await refreshSync();
         // Recargar con stock local actualizado
         const cached = await getOfflineProducts();
         setProducts(cached.filter((p) => (p.localStock ?? 0) > 0).map((p) => ({ ...p, isOfflineRow: true })));
         Alert.alert('✓ Venta guardada offline', `Factura ${offline.localId} se sincronizará automáticamente`);
       } else {
-        // ── Venta ONLINE: igual que antes.
+        // ── Venta ONLINE: el backend recalcula precios/impuestos y descuenta
+        //    el stock de la ubicación indicada.
         const invoice = await SalesAPI.create(saleData);
         receiptId = (invoice as any)?.invoiceNumber || (invoice as any)?.id || '';
+        // Solo se refresca el stock de ESTA ubicación (una llamada), no el
+        // catálogo completo de la empresa.
         if (myLocationId) {
           const { items } = await LocationsAPI.stock(myLocationId);
-          await cacheProducts(items);
+          await cacheProducts(items, myLocationId);
           setProducts(items.filter((p: any) => p.active && p.stock > 0));
         }
         Alert.alert('✓ Venta registrada', `La factura ${receiptId} se genero correctamente`);
@@ -226,7 +316,6 @@ export default function POSScreen() {
       setLineDiscounts({});
       setClientName(''); setClientNit(''); setClientPhone(''); setCashGiven('');
       setSaleDiscountId('');
-      load();
     } catch (err) {
       Alert.alert('Error', (err as Error).message);
     } finally {
@@ -250,6 +339,25 @@ export default function POSScreen() {
       {myLocationName ? (
         <Text style={styles.locationLabel}>Vendiendo desde: <Text style={styles.locationName}>{myLocationName}</Text></Text>
       ) : null}
+      {/* El admin no tiene ubicación propia: el backend exige indicar cuál es,
+          así que puede cambiarla aquí antes de cobrar. */}
+      {needsLocationPicker && online && (
+        <View style={styles.locationPicker}>
+          <Field label="Ubicación de venta">
+            <Sel
+              style={{ minWidth: 200 }}
+              value={myLocationId}
+              onValueChange={selectLocation}
+              items={[
+                { label: 'Seleccione...', value: '' },
+                ...locations
+                  .filter((l) => l.active !== false)
+                  .map((l) => ({ label: l.name, value: l.id })),
+              ]}
+            />
+          </Field>
+        </View>
+      )}
 
       {/* Buscador fijo con icono + botón agregar (igual que la web) */}
       <View style={styles.searchWrap}>
@@ -467,6 +575,7 @@ const createStyles = () => StyleSheet.create({
   offlineText: { color: '#fff', fontSize: 12, fontWeight: '600' },
   pageTitle: { fontSize: 20, fontWeight: '800', color: colors.text, paddingHorizontal: 16, paddingTop: 12, marginBottom: 4 },
   locationLabel: { paddingHorizontal: 16, fontSize: 12, color: colors.textMuted, marginBottom: 10 },
+  locationPicker: { paddingHorizontal: 16, marginBottom: 10 },
   locationName: { fontWeight: '700', color: colors.text },
   searchWrap: { paddingHorizontal: 16, marginBottom: 10 },
   search: { borderWidth: 1, borderColor: colors.inputBorder, borderRadius: 12, paddingLeft: 34, paddingRight: 44, paddingVertical: 9, backgroundColor: colors.inputBg, fontSize: 14, color: colors.text },

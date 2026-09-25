@@ -1,5 +1,6 @@
 node_modules/
 .expo/
+.expo-shared/
 android/
 ios/
 dist/
@@ -7,3 +8,21 @@ dist/
 npm-debug.*
 .DS_Store
 *.tsbuildinfo
+
+# ── Secretos y variables de entorno ─────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ── Firmas de publicación (EAS/Play Store): NUNCA al repo ───────────────────
+*.jks
+*.keystore
+*.p8
+*.p12
+*.mobileprovision
+credentials.json
+
+# ── Tests y sistema ─────────────────────────────────────────────────────────
+coverage/
+.DS_Store
+Thumbs.db

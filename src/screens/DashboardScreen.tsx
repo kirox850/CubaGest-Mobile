@@ -9,11 +9,18 @@ import { ErrorBanner, StatCard, SectionCard, PageHeader, Badge } from '../compon
 import Icon from '../components/Icon';
 import SalesAreaChart, { RANGE_OPTIONS } from '../components/SalesAreaChart';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { accountScopedKey } from '../offline/namespace';
+import { companyIdOf } from '../api/userShape';
 import type { DashboardSummary } from '../types';
 
 const fmt = (n: number) => new Intl.NumberFormat('es-CU', { minimumFractionDigits: 2 }).format(n || 0);
 const curSymbol = (c: string) => (c === 'EUR' ? '€' : '$');
-const CACHE_KEY = 'cubagest_dashboard';
+
+// El resumen cacheado es POR CUENTA: con una cache global, entrar con otra
+// cuenta en el mismo teléfono mostraba los números de la anterior. Se conserva
+// al cerrar sesión (no es dato sensible de la sesión, es caché del negocio).
+const cacheKeyFor = (userId: string, companyId: string) =>
+  accountScopedKey('dashboard', companyId, userId);
 
 // ─── DASHBOARD (clon del Dashboard.tsx de la web) ────────────────────────────
 export default function DashboardScreen() {
@@ -26,6 +33,8 @@ export default function DashboardScreen() {
   const [range, setRange] = useState('30d');
   const [cur, setCur] = useState('all');
 
+  const CACHE_KEY = user ? cacheKeyFor(user.id, companyIdOf(user)) : '';
+
   const load = useCallback(async () => {
     setLoading(true);
     setError('');
@@ -33,10 +42,10 @@ export default function DashboardScreen() {
       try {
         const data = await DashboardAPI.summary();
         setSummary(data);
-        await AsyncStorage.setItem(CACHE_KEY, JSON.stringify({ data, cachedAt: Date.now() }));
+        if (CACHE_KEY) await AsyncStorage.setItem(CACHE_KEY, JSON.stringify({ data, cachedAt: Date.now() }));
         setCacheDate(null);
       } catch (e) {
-        const raw = await AsyncStorage.getItem(CACHE_KEY);
+        const raw = CACHE_KEY ? await AsyncStorage.getItem(CACHE_KEY) : null;
         if (raw) {
           const { data, cachedAt } = JSON.parse(raw);
           setSummary(data);
@@ -48,7 +57,7 @@ export default function DashboardScreen() {
       const days = RANGE_OPTIONS.find((r) => r.value === range)?.days || 30;
       DashboardAPI.analytics(String(days)).then(setAnalytics).catch(() => {});
     } else {
-      const raw = await AsyncStorage.getItem(CACHE_KEY);
+      const raw = CACHE_KEY ? await AsyncStorage.getItem(CACHE_KEY) : null;
       if (raw) {
         const { data, cachedAt } = JSON.parse(raw);
         setSummary(data);
@@ -58,7 +67,7 @@ export default function DashboardScreen() {
       }
     }
     setLoading(false);
-  }, [online, range]);
+  }, [online, range, CACHE_KEY]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 

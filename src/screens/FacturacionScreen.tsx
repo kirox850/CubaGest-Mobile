@@ -51,7 +51,11 @@ export default function FacturacionScreen() {
     if (r.error) setSyncMsg(r.error);
     else if (r.attempted === 0) setSyncMsg('No hay ventas pendientes por sincronizar');
     else {
-      setSyncMsg(`${r.synced} venta(s) sincronizada(s)${r.conflicts ? ` · ${r.conflicts} conflicto(s) de stock` : ''}`);
+      const parts = [`${r.synced} venta(s) sincronizada(s)`];
+      if (r.conflicts) parts.push(`${r.conflicts} conflicto(s) de stock`);
+      // Sin resultado del servidor NO se pierde la venta: queda pendiente.
+      if (r.unknown) parts.push(`${r.unknown} sin respuesta (se reintentará)`);
+      setSyncMsg(parts.join(' · '));
       load();
     }
   };
@@ -140,9 +144,14 @@ export default function FacturacionScreen() {
           </View>
           {syncMsg ? <Text style={styles.syncMsg}>{syncMsg}</Text> : null}
           {pendingOffline.map((s: OfflineSale) => (
-            <View key={s.localId} style={styles.offlineRow}>
-              <Text style={styles.offlineId}>⏳ {s.localId}</Text>
-              <Text style={styles.offlineAmt}>${fmt(Number(s.total))}</Text>
+            <View key={s.localId}>
+              <View style={styles.offlineRow}>
+                <Text style={styles.offlineId}>⏳ {s.localId}</Text>
+                <Text style={styles.offlineAmt}>${fmt(Number(s.total))}</Text>
+              </View>
+              {/* Por qué sigue pendiente: sin respuesta del servidor o sin
+                  conexión. La venta NO se perdió: se reintenta sola. */}
+              {s.lastError ? <Text style={styles.offlineHint}>{s.lastError}</Text> : null}
             </View>
           ))}
           {conflictOffline.map((s: OfflineSale) => (
@@ -297,6 +306,7 @@ const createStyles = () => StyleSheet.create({
   offlineRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 3 },
   offlineId: { fontSize: 12, fontWeight: '700', color: colors.primary, fontFamily: 'monospace' },
   offlineConflict: { fontSize: 11, fontWeight: '600', color: '#C2410C', flex: 1, marginRight: 8 },
+  offlineHint: { fontSize: 10, color: colors.textMuted, marginBottom: 4 },
   offlineAmt: { fontSize: 12, fontWeight: '700', color: colors.text },
   syncMsg: { fontSize: 12, fontWeight: '600', color: '#C2410C', marginBottom: 6 },
   syncBtn: { backgroundColor: colors.primary, borderRadius: 8, paddingVertical: 8, alignItems: 'center', marginTop: 6 },

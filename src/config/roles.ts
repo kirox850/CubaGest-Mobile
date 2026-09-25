@@ -1,29 +1,46 @@
-// Debe coincidir EXACTAMENTE con el backend (middleware/roles.ts) y la web
-// (App.tsx ROLES). Fase 0: la app tenía un set de perms desactualizado que
-// ocultaba pestañas a roles que sí deberían verlas (ej: cajero sin cierre,
-// transferencias ni auditoría) y usaba colores distintos.
+// Matriz de roles de CubaGest.
+// Debe coincidir con el backend (src/middleware/roles.ts) y con la web.
+//
+// Backend-owned (P0 item 7):
+//   admin       → todos los módulos
+//   cajero      → dashboard, POS, facturación, cierre, transferencias
+//   contador    → dashboard, contabilidad
+//   almacenista → dashboard, inventario, POS, cierre, transferencias
+//
+// "pos" no aparece en las pestañas (el POS vive dentro de Facturas), pero sí
+// cuenta como permiso: es lo que el backend exige (requireModule("pos")) para
+// crear ventas y para POST /sales/sync. Por eso un admin sin "pos" no podría
+// vender aunque tenga todos los demás módulos.
 export const ROLES: Record<string, { label: string; color: string; perms: string[] }> = {
   admin: {
     label: 'Administrador',
     color: '#048afb',
-    perms: ['dashboard', 'inventario', 'facturacion', 'contabilidad', 'cierre', 'usuarios', 'config', 'transferencias', 'auditoria', 'monedas'],
+    perms: [
+      'dashboard', 'inventario', 'pos', 'facturacion', 'contabilidad', 'cierre',
+      'usuarios', 'config', 'transferencias', 'auditoria', 'descuentos', 'monedas',
+    ],
   },
   cajero: {
     label: 'Cajero',
     color: '#048afb',
-    perms: ['dashboard', 'pos', 'facturacion', 'cierre', 'transferencias', 'auditoria'],
+    perms: ['dashboard', 'pos', 'facturacion', 'cierre', 'transferencias'],
   },
   contador: {
     label: 'Contador',
     color: '#10B981',
-    perms: ['dashboard', 'contabilidad', 'cierre', 'auditoria'],
+    perms: ['dashboard', 'contabilidad'],
   },
   almacenista: {
     label: 'Almacenista',
     color: '#7A5C1A',
-    perms: ['dashboard', 'inventario', 'pos', 'cierre', 'transferencias', 'auditoria'],
+    perms: ['dashboard', 'inventario', 'pos', 'cierre', 'transferencias'],
   },
 };
+
+/** ¿El rol puede entrar a este módulo? */
+export function canAccess(role: string | undefined, module: string): boolean {
+  return ROLES[role || '']?.perms.includes(module) ?? false;
+}
 
 // Labels idénticos a los de la web (constants.ts)
 export const PAY_METHODS = [

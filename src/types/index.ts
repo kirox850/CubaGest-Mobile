@@ -5,8 +5,10 @@ export interface User {
   name: string;
   email: string;
   role: 'admin' | 'cajero' | 'contador' | 'almacenista';
-  businessId: string;
+  /** Identificador de la empresa. El backend lo devuelve anidado en `company`. */
+  businessId?: string;
   company?: Company;
+  nit?: string;
   active?: boolean;
   pending?: boolean; // cuenta creada por el admin que aún no establece contraseña
   lastLoginAt?: string;
@@ -68,6 +70,10 @@ export interface Sale {
   payMethod: string;
   status: 'emitida' | 'anulada';
   userId?: string;
+  /** Ubicación desde la que se vendió. Inmutable: el stock sale de aquí. */
+  locationId?: string;
+  /** UUID generado por el dispositivo: idempotencia de la venta. */
+  clientSaleId?: string;
   items?: SaleItem[];
   SaleItems?: SaleItem[];
   createdAt?: string;
@@ -206,6 +212,9 @@ export interface Transfer {
   rejectReason?: string | null;
   items: TransferItem[];
   createdAt: string;
+  /** Resueltos por el backend: quién puede aprobar/rechazar y quién cancelar. */
+  canResolve?: boolean;
+  canCancel?: boolean;
 }
 
 // ─── Auditoría ─────────────────────────────────────────────────────────────
@@ -258,17 +267,13 @@ export interface PlanInfo {
   };
 }
 
-// El login real del backend devuelve accessToken (corta duración, 1h) +
-// refreshToken (7 días) + user — no un solo "token" como antes.
+// El login real del backend devuelve accessToken (corta duración) +
+// refreshToken + user. El registro actual devuelve un único `token` y ningún
+// refreshToken, por eso refreshToken es opcional al normalizar.
 export interface AuthResponse {
   accessToken: string;
-  refreshToken: string;
+  refreshToken?: string;
   user: User;
-}
-
-// POST /auth/refresh solo devuelve un accessToken nuevo, no el user.
-export interface RefreshResponse {
-  accessToken: string;
 }
 
 export interface ApiFetchOptions {
