@@ -10,8 +10,16 @@
 //
 // RIESGO ACEPTADO Y REPORTADO: los tokens quedan en claro en el almacenamiento
 // de la app. En un Android rooteado o con acceso al sandbox son legibles. El
-// riesgo está aislado en ESTE archivo porque el resto de la app (session.ts,
-// client.ts) solo habla con `secretStorage`.
+// RIESGO ACEPTADO Y DECIDIDO POR EL DUEÑO: se decide NO cifrar los tokens.
+// Se evaluó y la conclusión es que el riesgo real es bajo — en Cuba los
+// teléfonos casi nunca están rooteados, y la app ya pide el PIN al volver del
+// fondo, así que las llaves no se pueden copiar desde otro teléfono. Lo que
+// quedaría fuera de alcance es un dispositivo rooteado o con acceso por ADB:
+// aceptado a conciencia, no por descuido.
+//
+// El riesgo está aislado en ESTE archivo porque el resto de la app (session.ts,
+// client.ts) solo habla con `secretStorage`. Cambiarlo después es cosa de un
+// solo archivo.
 //
 // ── Cómo migrar cuando instales expo-secure-store (con red) ────────────────
 // 1. `npx expo install expo-secure-store` (la añade a package.json)
