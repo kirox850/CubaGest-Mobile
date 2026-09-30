@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { TouchableOpacity, Text, Alert, View, Image, StyleSheet, Modal, Pressable } from 'react-native';
+import { TouchableOpacity, Text, View, Image, StyleSheet, Modal, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NavigationContainer, DefaultTheme, DarkTheme } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -11,21 +11,21 @@ import { colors, shadow, NAVY, themeRef } from '../config/theme';
 import { PRIVACY_POLICY_MD, TERMS_MD } from '../config/legalContent';
 import type { User } from '../types';
 import PlanModal from '../components/PlanModal';
+import ConfiguracionScreen, { type TabId } from '../screens/ConfiguracionScreen';
+import { DialogHost, showConfirm } from '../components/dialogs';
+import { ToastHost } from '../components/UI';
 import LegalModal from '../components/LegalModal';
 import WelcomeTour from '../components/WelcomeTour';
-import Icon from '../components/Icon';
+import Icon, { type IconName } from '../components/Icon';
 
 import DashboardScreen from '../screens/DashboardScreen';
 import InventarioScreen from '../screens/InventarioScreen';
 import POSScreen from '../screens/POSScreen';
 import FacturacionScreen from '../screens/FacturacionScreen';
 import ContabilidadScreen from '../screens/ContabilidadScreen';
-import UsuariosScreen from '../screens/UsuariosScreen';
 import CierreCajaScreen from '../screens/CierreCajaScreen';
 import TransferenciasScreen from '../screens/TransferenciasScreen';
-import AuditoriaScreen from '../screens/AuditoriaScreen';
-import MonedasScreen from '../screens/MonedasScreen';
-import DiscountsScreen from '../screens/DiscountsScreen';
+import MovimientosDineroScreen from '../screens/MovimientosDineroScreen';
 
 const Tab = createBottomTabNavigator();
 
@@ -34,7 +34,7 @@ const Tab = createBottomTabNavigator();
 // Los módulos usuarios/auditoria/monedas/descuentos NO van en la barra: en la
 // web se abren desde el menú de perfil y aquí se replican igual (screens
 // ocultas a las que el menú navega).
-const NAV_ITEMS: { key: string; label: string; icon: string; component: React.ComponentType<any> }[] = [
+const NAV_ITEMS: { key: string; label: string; icon: IconName; component: React.ComponentType<any> }[] = [
   { key: 'dashboard',    label: 'Dashboard',      icon: 'dashboard',    component: DashboardScreen },
   { key: 'inventario',   label: 'Inventario',     icon: 'inventario',   component: InventarioScreen },
   { key: 'pos',          label: 'Punto de Venta', icon: 'pos',          component: POSScreen },
@@ -45,11 +45,8 @@ const NAV_ITEMS: { key: string; label: string; icon: string; component: React.Co
 ];
 
 // Screens de menú (sin botón en la tab bar)
-const MENU_SCREENS: { key: string; label: string; icon: string; component: React.ComponentType<any> }[] = [
-  { key: 'usuarios',   label: 'Usuarios',    icon: 'usuarios',   component: UsuariosScreen },
-  { key: 'auditoria',  label: 'Auditoría',   icon: 'auditoria',  component: AuditoriaScreen },
-  { key: 'descuentos', label: 'Descuentos',  icon: 'facturacion', component: DiscountsScreen },
-  { key: 'monedas',    label: 'Monedas y Tasas', icon: 'contabilidad', component: MonedasScreen },
+const MENU_SCREENS: { key: string; label: string; icon: IconName; component: React.ComponentType<any> }[] = [
+  { key: 'movimientos', label: 'Entradas y Salidas', icon: 'cash', component: MovimientosDineroScreen },
 ];
 
 function HeaderRight({ navigation, onOpenPlan, onOpenLegal, onOpenTour, onOpenModule }: {
@@ -65,18 +62,15 @@ function HeaderRight({ navigation, onOpenPlan, onOpenLegal, onOpenTour, onOpenMo
   const [menuOpen, setMenuOpen] = useState(false);
   const perms = ROLES[user?.role || '']?.perms || [];
 
-  const confirmLogout = () => {
+  const confirmLogout = async () => {
     setMenuOpen(false);
-    Alert.alert('Cerrar sesión', '¿Seguro que desea salir?', [
-      { text: 'Cancelar', style: 'cancel' },
-      { text: 'Salir', style: 'destructive', onPress: logout },
-    ]);
+    if (await showConfirm('¿Seguro que desea salir? Se cerrará el turno abierto.')) logout();;
   };
 
   const roleColor = ROLES[user?.role || '']?.color || colors.primary;
 
   // Item del menú con icono SVG real (paridad con el menú de perfil web)
-  const Item = ({ icon, label, onPress, color }: { icon: string; label: string; onPress: () => void; color?: string }) => (
+  const Item = ({ icon, label, onPress, color }: { icon: IconName; label: string; onPress: () => void; color?: string }) => (
     <TouchableOpacity style={s.menuItem} onPress={() => { setMenuOpen(false); onPress(); }}>
       <Icon name={icon} size={16} color={color || colors.textSecondary} />
       <Text style={[s.menuItemText, color ? { color } : null]}>{label}</Text>
@@ -98,7 +92,7 @@ function HeaderRight({ navigation, onOpenPlan, onOpenLegal, onOpenTour, onOpenMo
         >
           <Text style={s.syncPillText}>
             {conflictCount > 0
-              ? `⚠ ${conflictCount} conflicto${conflictCount !== 1 ? 's' : ''}`
+              ? `${conflictCount} conflicto${conflictCount !== 1 ? 's' : ''}`
               : syncing
                 ? '⟳ Sync...'
                 : `⇅ ${pendingCount}`}
@@ -125,14 +119,19 @@ function HeaderRight({ navigation, onOpenPlan, onOpenLegal, onOpenTour, onOpenMo
               </View>
             </View>
 
-            <Item icon="facturacion" label="Mi Plan" onPress={onOpenPlan} />
-            {user?.role === 'admin' && <Item icon="usuarios" label="Usuarios" onPress={() => onOpenModule('usuarios')} />}
-            {perms.includes('auditoria') && <Item icon="auditoria" label="Auditoría" onPress={() => onOpenModule('auditoria')} />}
-            {user?.role === 'admin' && <Item icon="facturacion" label="Descuentos" onPress={() => onOpenModule('descuentos')} />}
-            {user?.role === 'admin' && <Item icon="contabilidad" label="Monedas y Tasas" onPress={() => onOpenModule('monedas')} />}
+            {/* Antes eran cinco entradas sueltas (Usuarios, Auditoría, Descuentos,
+                Monedas, Cajas) más "Mi Plan" y "Entradas y Salidas". Todas menos
+                esta última son PESTAÑAS de Configuración en la web: aquí
+                mantenidas aparte, cada una era una pantalla completa, seis rutas
+                distintas a las que había que aprender una a una.
+                La pestaña de arranque se pasa para no obligar a elegir dos veces. */}
+            <Item icon="settings" label="Configuración" onPress={() => onOpenModule('configuracion')} />
+            {(perms.includes('cierre') || perms.includes('contabilidad')) && (
+              <Item icon="cash" label="Entradas y Salidas" onPress={() => onOpenModule('movimientos')} />
+            )}
             <Item icon="dashboard" label="Ver tour de bienvenida" onPress={onOpenTour} />
             <TouchableOpacity style={s.menuItem} onPress={() => { toggleTheme(); }}>
-              <Text style={{ fontSize: 16 }}>{mode === 'dark' ? '☀️' : '🌙'}</Text>
+              <Icon name={mode === 'dark' ? 'sun' : 'moon'} size={17} color={colors.text} />
               <Text style={s.menuItemText}>{mode === 'dark' ? 'Modo claro' : 'Modo oscuro'}</Text>
             </TouchableOpacity>
 
@@ -161,7 +160,7 @@ function getTrialBannerInfo(user: User | null): TrialBannerInfo | null {
     : null;
   if (daysLeft === null) return null;
   const urgent = daysLeft <= 7;
-  return { daysLeft, urgent, color: urgent ? '#C2410C' : '#1D4ED8' };
+  return { daysLeft, urgent, color: urgent ? colors.warningText : colors.primaryText };
 }
 
 function TrialBanner({ info, onPress }: { info: TrialBannerInfo; onPress: () => void }) {
@@ -169,7 +168,7 @@ function TrialBanner({ info, onPress }: { info: TrialBannerInfo; onPress: () => 
   return (
     <TouchableOpacity style={[s.trialBanner, { backgroundColor: color }]} onPress={onPress}>
       <Text style={s.trialBannerText}>
-        {urgent ? '⚠ ' : '🎁 '}
+        {urgent ? '' : ''}
         Período de prueba gratis — {daysLeft} día{daysLeft !== 1 ? 's' : ''} restante{daysLeft !== 1 ? 's' : ''}
         {urgent ? ' · Toca aquí para ver planes' : ' · Plan Empresarial completo'}
       </Text>
@@ -188,19 +187,29 @@ export default function AppNavigator() {
   // así que un usuario sin módulos ("rol desconocido") montaba el componente
   // con un número de hooks distinto al del resto → error de hooks en
   // producción justo cuando se navega tras un cambio de rol.
-  const [planOpen, setPlanOpen] = useState(false);
+  const [configOpen, setConfigOpen] = useState(false);
+  // `null` = que Configuración abra en su primera pestaña visible para este rol.
+  const [configTab, setConfigTab] = useState<TabId | null>(null);
   const [legalDoc, setLegalDoc] = useState<'privacy' | 'terms' | null>(null);
   const [tourOpen, setTourOpen] = useState(false);
 
   // Barra inferior: solo los 7 nav items de la web filtrados por permisos.
   const tabs = NAV_ITEMS.filter(n => perms.includes(n.key));
-  // Screens de menú disponibles según rol (se registran ocultas para poder
-  // navegar a ellas desde el menú de perfil).
+  // El gate de cada pantalla va POR PERMISO, no por rol, cuando lo que
+  // protege el backend es un módulo. `GET /cash-movements` es
+  // `requireAnyModule("cierre", "pos", "contabilidad")` (cashMovements.ts:46), y
+  // los cuatro roles lo pasan por alguna vía: el cajero y el almacenista por
+  // "cierre", el contador por "contabilidad". Un filtro por rol escondería la
+  // pantalla de dinero a un cajero que sí puede verla y usarla.
   const menuScreens = MENU_SCREENS.filter(t =>
     (t.key === 'usuarios' && user?.role === 'admin') ||
     (t.key === 'descuentos' && user?.role === 'admin') ||
     (t.key === 'monedas' && user?.role === 'admin') ||
-    (t.key === 'auditoria' && perms.includes('auditoria'))
+    (t.key === 'auditoria' && perms.includes('auditoria')) ||
+    (t.key === 'movimientos' && (perms.includes('cierre') || perms.includes('contabilidad'))) ||
+    // Cajas: TODO lo que hay detrás es requireRole("admin") —
+    // POST /locations, PUT /shift/assignments/:userId y PUT /settings.
+    (t.key === 'cajas' && user?.role === 'admin')
   );
 
   if (tabs.length === 0) {
@@ -225,7 +234,7 @@ export default function AppNavigator() {
     <View style={{ flex: 1 }}>
       {trialInfo && (
         <SafeAreaView edges={['top']} style={{ backgroundColor: NAVY }}>
-          <TrialBanner info={trialInfo} onPress={() => setPlanOpen(true)} />
+          <TrialBanner info={trialInfo} onPress={() => { setConfigTab('plan'); setConfigOpen(true); }} />
         </SafeAreaView>
       )}
 
@@ -258,10 +267,14 @@ export default function AppNavigator() {
             headerRight: () => (
               <HeaderRight
                 navigation={navigation}
-                onOpenPlan={() => setPlanOpen(true)}
+                onOpenPlan={() => { setConfigTab('plan'); setConfigOpen(true); }}
                 onOpenLegal={(doc) => setLegalDoc(doc)}
                 onOpenTour={() => setTourOpen(true)}
-                onOpenModule={(key) => navigation.navigate(key === 'monedas' ? 'Monedas y Tasas' : key === 'descuentos' ? 'Descuentos' : key === 'usuarios' ? 'Usuarios' : 'Auditoría')}
+                onOpenModule={(key) => {
+                  if (key === 'configuracion') { setConfigTab(null); setConfigOpen(true); return; }
+                  const destino = MENU_SCREENS.find(t => t.key === key);
+                  if (destino) navigation.navigate(destino.label);
+                }}
               />
             ),
             headerTintColor: '#ffffff',
@@ -270,7 +283,9 @@ export default function AppNavigator() {
             // Labels compactos + tab bar más alta: los 7 items de la web caben
             // sin cortar el nombre (el problema era la altura fija con labels
             // largos tipo "Punto de Venta").
-            tabBarLabelStyle: { fontSize: 9, fontWeight: '500', marginBottom: 3 },
+            // 9 era ilegible en un teléfono. 10 es el mínimo de la escala (`type.2xs`): por
+            // debajo, un usuario tiene que agrandar la pantalla para leer dónde está.
+            tabBarLabelStyle: { fontSize: 10, fontWeight: '500', marginBottom: 3 },
             tabBarStyle: {
               backgroundColor: colors.bgCard,
               borderTopColor: colors.border,
@@ -308,7 +323,17 @@ export default function AppNavigator() {
         </Tab.Navigator>
       </NavigationContainer>
 
-      <PlanModal visible={planOpen} onClose={() => setPlanOpen(false)} user={user} />
+      {/* UN host de cada uno, montados aquí y no en cada pantalla: los 83
+          Alert.alert que había eran 83 diálogos distintos, cada uno con su
+          estilo. Aquí hay uno solo, con el tema del producto. */}
+      <ToastHost />
+      <DialogHost />
+
+      <ConfiguracionScreen
+        visible={configOpen}
+        onClose={() => setConfigOpen(false)}
+        initialTab={configTab || undefined}
+      />
       <WelcomeTour forceOpen={tourOpen} onClose={() => setTourOpen(false)} />
       <LegalModal
         visible={legalDoc === 'privacy'}

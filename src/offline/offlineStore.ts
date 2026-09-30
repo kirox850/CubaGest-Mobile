@@ -15,10 +15,26 @@
 //   sales        → ventas offline pendientes/synced/conflict (LOCAL-0001…)
 //   sync_log     → historial de sincronizaciones
 //   meta         → contadores y última sincronización
+//
+// Colecciones de LECTURA (por cuenta, para pintar sin red):
+//   locations    → cajas y almacenes de la empresa
+//   readings     → lecturas de apertura de inventario
+//   sales_index  → ventas ya confirmadas por el servidor
+//   closings     → cierres de caja
+//   movements    → entradas y salidas de dinero
+//   settings     → monedas, modo de tasa y tolerancia de caja
+//   discounts    → descuentos aplicables a una venta
+//
+// El turno NO está aquí: lo guarda `useShift` bajo `cubagest_shift:<userId>`.
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { activeKeys, getActiveNamespace, namespaceKey, UNKNOWN_LOCATION } from './namespace';
+import {
+  accountScopedKey, activeKeys, getActiveNamespace, namespaceKey,
+  recallLocation, writeLocationHint, UNKNOWN_LOCATION,
+} from './namespace';
+import { derivarLocalStock, pendingQtyPorProducto } from './localStock';
 import { generateUuid, isUuid } from '../utils/uuid';
+import type { Location, InventoryReading, Sale, Closing, CashMovement } from '../types';
 
 export type SyncStatus = 'pending' | 'syncing' | 'synced' | 'conflict';
 
@@ -144,6 +160,22 @@ export async function getLastProductSync(): Promise<number | null> {
 }
 
 // ── Productos ───────────────────────────────────────────────────────────────
+
+/**
+ * Cuánto de cada producto está comprometido en ventas que AÚN no han subido.
+ *
+ * Es una lectura simple, sin lock propio: la usa `cacheProducts` DENTRO de su
+ * `serialize()`, y ahí queda atómica con la escritura del catálogo. Si se
+ * leyera fuera, entre la lectura y la escritura se podría colar una venta y el
+ * catálogo guardado ofrecería mercancía ya vendida.
+ */
+async function readPendingQty(): Promise<Record<string, number>> {
+  const keys = activeKeys();
+  if (!keys) return {};
+  const sales = Object.values(await readJSON<Record<string, OfflineSale>>(keys.sales, {}));
+  return pendingQtyPorProducto(sales);
+}
+
 export async function cacheProducts(products: any[], locationId?: string): Promise<void> {
   const keys = activeKeys();
   if (!keys) return; // sin namespace no se cachea nada: jamás entre cuentas
@@ -153,12 +185,20 @@ export async function cacheProducts(products: any[], locationId?: string): Promi
   if (locationId && active && locationId !== active.locationId) return;
 
   await serialize(async () => {
-    const prev = await readJSON<Record<string, OfflineProduct>>(keys.products, {});
+    // Lo que este dispositivo ya vendió y el servidor todavía no sabe. Se lee
+    // aquí dentro, con el catálogo, para que los dos datos sean del mismo
+    // instante: entre una lectura y otra se puede colar una venta.
+    const pending = await readPendingQty();
     const now = Date.now();
     const next: Record<string, OfflineProduct> = {};
 
     for (const p of products) {
-      const old = prev[p.id];
+      // El stock que se puede cobrar es el del servidor MENOS lo que este
+      // dispositivo ya vendió sin sincronizar. Antes se conservaba el
+      // `localStock` viejo si el producto ya estaba, y si era nuevo se
+      // guardaba el stock entero: en ambos casos la app ofrecía más mercancía
+      // de la que existía, que es peor que no ofrecer nada.
+      const localStock = derivarLocalStock(Number(p.stock), pending[p.id] || 0);
       next[p.id] = {
         id: p.id,
         code: p.code || '',
@@ -166,9 +206,7 @@ export async function cacheProducts(products: any[], locationId?: string): Promi
         price: Number(p.price),
         cost: Number(p.cost || 0),
         stock: Number(p.stock),
-        // Si el producto ya estaba cacheado conservamos el localStock (ventas
-        // offline sin sincronizar aún); si es nuevo, arranca igual que stock.
-        localStock: old ? old.localStock : Number(p.stock),
+        localStock,
         unit: p.unit || 'ud',
         category: p.category || '',
         active: p.active !== false,
@@ -396,6 +434,23 @@ export async function getPendingCount(): Promise<number> {
   return (await getPendingSales()).length;
 }
 
+// ── Colas que NO se construyen, y por qué ───────────────────────────────────
+//
+// ENTRADAS Y SALIDAS DE DINERO. No hay cola para ellas, a propósito.
+//
+// `POST /cash-movements` NO es idempotente: no acepta id de cliente, no tiene
+// índice único y no hay `onConflict`. Un reintento tras un corte de red —que es
+// exactamente lo que hace una cola— crearía un SEGUNDO movimiento por el mismo
+// retiro, y el saldo de la caja quedaría descuadrado por dinero registrado dos
+// veces.
+//
+// El cierre no tiene ese problema: `POST /closing/confirm` usa
+// `initialReadingId` como `confirm_key`, con un índice único parcial
+// (migración 0007) y un 409 `READING_ALREADY_CLOSED` (routes/closing.ts:294-310).
+// Reenviar el mismo cierre no puede cerrarla dos veces, así que esa cola sí es
+// segura. Movimientos requiere antes una clave de idempotencia en el backend;
+// hasta entonces se hacen con conexión, que es preferible a duplicar un retiro.
+
 export async function getConflictCount(): Promise<number> {
   const all = Object.values(await readSales());
   return all.filter((s) => s.status === 'conflict').length;
@@ -420,6 +475,149 @@ export async function resetStuckSyncingSales(): Promise<number> {
     if (recovered > 0) await writeJSON(keys.sales, sales);
     return recovered;
   });
+}
+
+// ── Ubicaciones y lecturas (cachés DE CUENTA, no de ubicación) ──────────────
+//
+// Estas dos cachés viven bajo companyId+userId y NO bajo el namespace de
+// ubicación, y eso es deliberado. Son la respuesta a la pregunta "¿en qué caja
+// estoy?", y si dependieran de la ubicación no podrían contestar nada: para
+// leerlas habría que saber ya la ubicación, que es justo lo que se está
+// buscando. El mismo razonamiento que en la web (`useLocations`): sin copia
+// local de /locations, el modo sin conexión se veía roto entero, y no era el
+// POS ni el inventario, era que no había forma de saber a qué caja pertenecía
+// el catálogo cacheado.
+
+function accountKey(name: string): string | null {
+  const active = getActiveNamespace();
+  if (!active) return null;
+  return accountScopedKey(name, active.companyId, active.userId);
+}
+
+export async function cacheLocations(locations: Location[]): Promise<void> {
+  const key = accountKey('locations');
+  if (!key) return;
+  const lista = Array.isArray(locations) ? locations : [];
+  if (lista.length === 0) return;   // un vacío no borra la última versión buena
+  await serialize(async () => { await writeJSON(key, lista); });
+}
+
+export async function getOfflineLocations(): Promise<Location[]> {
+  const key = accountKey('locations');
+  if (!key) return [];
+  return readJSON<Location[]>(key, []);
+}
+
+export async function cacheReadings(readings: InventoryReading[]): Promise<void> {
+  const key = accountKey('readings');
+  if (!key) return;
+  const lista = Array.isArray(readings) ? readings : [];
+  if (lista.length === 0) return;
+  await serialize(async () => { await writeJSON(key, lista); });
+}
+
+/**
+ * Las lecturas de apertura guardadas. Son la BASE del conteo del cierre: sin
+ * copia local no se puede empezar a cerrar sin red, que es lo que pasaba.
+ */
+export async function getOfflineReadings(): Promise<InventoryReading[]> {
+  const key = accountKey('readings');
+  if (!key) return [];
+  return readJSON<InventoryReading[]>(key, []);
+}
+
+// ── Colecciones de lectura (las pantallas las necesitan sin red) ─────────────
+//
+// Estas NO son colas de escritura: son la última versión buena que el servidor
+// entregó, para que una pantalla pueda pintar algo cuando no hay red. Mismo
+// patrón que `locations` y `readings`: por cuenta, y un array vacío NUNCA borra
+// la copia anterior, porque un cierre que se borrara dejaría al cajero sin
+// poder consultar el último que hizo.
+//
+// El turno NO vive aquí: lo guarda `useShift` bajo `cubagest_shift:<userId>`.
+// Es funcionalmente lo mismo que una clave por cuenta y moverlo no cambia nada
+// que el usuario vea, así que se deja donde está y no se toca el arreglo que
+// impide perder la lista de cajas.
+
+/** Sustituye una colección de lectura, conservando la anterior si llega vacía. */
+async function cacheList<T>(name: string, items: T[] | null | undefined): Promise<void> {
+  const key = accountKey(name);
+  if (!key) return;
+  const lista = Array.isArray(items) ? items : [];
+  if (lista.length === 0) return;   // un vacío no borra la última versión buena
+  await serialize(async () => { await writeJSON(key, lista); });
+}
+
+/** Lee una colección de lectura. Array vacío = nunca se descargó o no hay copia. */
+async function readList<T>(name: string): Promise<T[]> {
+  const key = accountKey(name);
+  if (!key) return [];
+  const v = await readJSON<T[]>(key, []);
+  return Array.isArray(v) ? v : [];
+}
+
+/** Guarda un documento suelto (no una lista), sin borrarlo si llega vacío. */
+async function cacheDoc(name: string, doc: unknown): Promise<void> {
+  const key = accountKey(name);
+  if (!key) return;
+  if (!doc || typeof doc !== 'object') return;
+  await serialize(async () => { await writeJSON(key, doc); });
+}
+
+/** Lee un documento suelto. `null` = nunca se descargó o no hay copia. */
+async function getOfflineDoc<T>(name: string): Promise<T | null> {
+  const key = accountKey(name);
+  if (!key) return null;
+  const v = await readJSON<T | null>(key, null);
+  return v && typeof v === 'object' ? v : null;
+}
+
+// Las ventas del servidor, para pintar el listado de facturación sin red. Las
+// ventas PENDIENTES viven en la cola `sales`, que es otra cosa: esto es solo el
+// histórico que el servidor ya confirmó.
+export const cacheSales = (sales: Sale[]) => cacheList<Sale>('sales_index', sales);
+export const getOfflineSales = (): Promise<Sale[]> => readList<Sale>('sales_index');
+
+// Los cierres: la lista del cajero. Sin esta copia, sin red no había forma de
+// saber qué cierres existen ni cuál era el provisional pendiente.
+export const cacheClosings = (c: Closing[]) => cacheList<Closing>('closings', c);
+export const getOfflineClosings = (): Promise<Closing[]> => readList<Closing>('closings');
+
+// Entradas y salidas de dinero de la caja.
+export const cacheMovements = (m: CashMovement[]) => cacheList<CashMovement>('movements', m);
+export const getOfflineMovements = (): Promise<CashMovement[]> => readList<CashMovement>('movements');
+
+// Ajustes de la empresa: monedas, modo de tasa y tolerancia de caja. El POS
+// pinta el símbolo de la moneda desde aquí, así que sin esta copia una venta
+// offline se guarda sin moneda y el cierre posterior no cuadra.
+export const cacheSettings = (s: unknown) => cacheDoc('settings', s);
+export const getOfflineSettings = () => getOfflineDoc<Record<string, unknown>>('settings');
+
+// El resumen contable que devuelve el backend (summary + ingresos + egresos).
+// Es un agregado, no una lista: se guarda entero bajo una clave.
+export const cacheContabilidad = (c: unknown) => cacheDoc('contabilidad', c);
+export const getOfflineContabilidad = () => getOfflineDoc<Record<string, unknown>>('contabilidad');
+
+// Descuentos aplicables a una venta.
+export const cacheDiscounts = (d: any[]) => cacheList<any>('discounts', d);
+export const getOfflineDiscounts = (): Promise<any[]> => readList<any>('discounts');
+
+// ── Última ubicación conocida ────────────────────────────────────────────────
+// No es un almacén nuevo: delega en la pista que YA existe en namespace.ts
+// (`cubagest_offline_location_hints`, por usuario y sobreviviente al logout).
+// Dos almacenes de lo mismo divergirían, y el que divergiera siempre sería el
+// que nadie lee al depurar.
+
+export async function getLastLocationId(): Promise<string | null> {
+  const active = getActiveNamespace();
+  if (!active) return null;
+  return recallLocation(active.userId);
+}
+
+export async function setLastLocationId(locationId: string): Promise<void> {
+  const active = getActiveNamespace();
+  if (!active || !locationId) return;
+  await writeLocationHint(active.userId, locationId);
 }
 
 // ── Sync log ────────────────────────────────────────────────────────────────

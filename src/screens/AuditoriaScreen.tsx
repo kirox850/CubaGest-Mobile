@@ -5,31 +5,43 @@ import {
 import { useFocusEffect } from '@react-navigation/native';
 import { AuditAPI } from '../api/endpoints';
 import { colors, themeRef } from '../config/theme';
-import { Badge, EmptyState, ErrorBanner } from '../components/UI';
+import { Badge, EmptyState, ErrorBanner, SkeletonRows } from '../components/UI';
+import Icon, { type IconName } from '../components/Icon';
 import type { AuditLog } from '../types';
 
-// Mapeo de acciones a etiquetas legibles — igual que la web.
-const ACTION_LABELS: Record<string, { label: string; color: string }> = {
-  'auth.login': { label: '🔐 Login', color: colors.primary },
-  'auth.register': { label: '🏢 Registro', color: '#8B5CF6' },
-  'product.create': { label: '➕ Producto', color: colors.success },
-  'product.update': { label: '✏️ Producto', color: colors.primary },
-  'product.delete': { label: '🗑 Producto', color: colors.danger },
-  'sale.create': { label: '🧾 Venta', color: colors.success },
-  'sale.void': { label: '🚫 Anulación', color: colors.danger },
-  'expense.create': { label: '💸 Egreso', color: '#F97316' },
-  'expense.delete': { label: '🗑 Egreso', color: colors.danger },
-  'user.create': { label: '➕ Usuario', color: colors.success },
-  'user.update': { label: '✏️ Usuario', color: colors.primary },
-  'user.delete': { label: '🗑 Usuario', color: colors.danger },
-  'transfer.create': { label: '🚚 Envío', color: '#8B5CF6' },
-  'transfer.approve': { label: '✅ Envío ok', color: colors.success },
-  'transfer.reject': { label: '❌ Envío rech.', color: colors.danger },
-  'location.adjust_stock': { label: '📦 Ajuste stock', color: '#F97316' },
-  'closing.take_reading': { label: '📸 Lectura', color: colors.primary },
-  'closing.confirm': { label: '🧮 Cierre', color: colors.success },
-  'subscription.payment': { label: '💳 Pago', color: colors.success },
+// Mapeo de acciones a etiquetas legibles — igual que la web, pero con el icono
+// al lado en vez de un emoji DENTRO del texto. La diferencia no es cosmetic:
+//
+//  · el emoji viajaba dentro del string de la etiqueta, así que no se podía
+//    pintar con el color del estado ni escalarlo, y en Android caía en la
+//    tipografía del sistema en vez de en la del producto — se veía distinto en
+//    cada teléfono, que es lo contrario de "el mismo producto";
+//  · un emoji dentro de un <Text> se lee como parte de la frase; un Icon al
+//    lado se lee como lo que es: una categoría.
+type AccionMeta = { icon: IconName; label: string; color: string };
+
+const ACTION_LABELS: Record<string, AccionMeta> = {
+  'auth.login':         { icon: 'lock',    label: 'Login',        color: colors.primary },
+  'auth.register':      { icon: 'building', label: 'Registro',    color: colors.primary },
+  'product.create':     { icon: 'plus',    label: 'Producto',    color: colors.success },
+  'product.update':     { icon: 'edit',    label: 'Producto',    color: colors.primary },
+  'product.delete':     { icon: 'trash',   label: 'Producto',    color: colors.danger },
+  'sale.create':        { icon: 'doc',     label: 'Venta',        color: colors.success },
+  'sale.void':          { icon: 'x',       label: 'Anulación',    color: colors.danger },
+  'expense.create':     { icon: 'minus',   label: 'Egreso',       color: colors.warning },
+  'expense.delete':     { icon: 'trash',   label: 'Egreso',       color: colors.danger },
+  'user.create':        { icon: 'plus',    label: 'Usuario',      color: colors.success },
+  'user.update':        { icon: 'edit',    label: 'Usuario',      color: colors.primary },
+  'user.delete':        { icon: 'trash',   label: 'Usuario',      color: colors.danger },
+  'transfer.create':    { icon: 'transferencias', label: 'Envío', color: colors.primary },
+  'transfer.approve':   { icon: 'check',   label: 'Envío ok',     color: colors.success },
+  'transfer.reject':    { icon: 'x',       label: 'Envío rech.',  color: colors.danger },
+  'location.adjust_stock': { icon: 'warehouse', label: 'Ajuste stock', color: colors.warning },
+  'closing.take_reading':  { icon: 'clock',    label: 'Lectura',      color: colors.primary },
+  'closing.confirm':       { icon: 'cierre',   label: 'Cierre',       color: colors.success },
+  'subscription.payment':  { icon: 'credit_card', label: 'Pago',      color: colors.success },
 };
+
 
 const ENTITY_FILTERS = [
   { id: '', label: 'Todo' },
@@ -43,7 +55,7 @@ const ENTITY_FILTERS = [
   { id: 'inventory_reading', label: 'Lecturas' },
 ];
 
-export default function AuditoriaScreen() {
+export default function AuditoriaScreen({ embedded = false }: { embedded?: boolean }) {
   const [rows, setRows] = useState<AuditLog[]>([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
@@ -85,7 +97,7 @@ export default function AuditoriaScreen() {
 
   return (
     <View style={styles.wrap}>
-      <Text style={styles.title}>Auditoría</Text>
+      {!embedded && <Text style={styles.title}>Auditoría</Text>}
       <Text style={styles.subtitle}>Registro de actividad de la empresa</Text>
 
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8 }}>
@@ -109,9 +121,20 @@ export default function AuditoriaScreen() {
         keyExtractor={(r) => r.id}
         contentContainerStyle={{ paddingBottom: 24 }}
         ListEmptyComponent={
-          loading
-            ? <EmptyState icon="⏳" text="Cargando..." />
-            : <EmptyState icon="🕵️" text="No hay registros de auditoría" />
+          // ─── Esqueleto de carga ───────────────────────────────────────────
+          // La fila de auditoría es un registro de tabla: insignia de acción,
+          // usuario y detalle. El esqueleto repite esa fila con barras de tres
+          // líneas, así que al llegar los registros la altura es la misma y no
+          // se recoloca nada. Sirve igual embebida en Configuración: el padding
+          // de las filas es el de la pantalla, y el margen negativo compensa el
+          // padding propio de `SkeletonRows` para que midan igual.
+          loading ? (
+            <View style={{ margin: -12 }}>
+              <SkeletonRows n={6} h={78} />
+            </View>
+          ) : (
+            <EmptyState icon="clipboard" text="No hay registros de auditoría" />
+          )
         }
         renderItem={({ item: r }) => {
           const meta = ACTION_LABELS[r.action] || { label: r.action, color: colors.textMuted };
@@ -120,10 +143,13 @@ export default function AuditoriaScreen() {
             <View style={styles.row}>
               <View style={{ flex: 1 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                  <Text style={styles.action}>{meta.label}</Text>
+                  <Badge icon={meta.icon} label={meta.label} color={meta.color} />
                   <Badge label={r.entity} color={meta.color} />
                 </View>
-                <Text style={styles.userName}>👤 {r.userName}</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                  <Icon name="usuarios" size={13} color={colors.textMuted} />
+                  <Text style={styles.userName}>{r.userName}</Text>
+                </View>
                 {detail ? (
                   <Text style={styles.detail} numberOfLines={3}>{detail}</Text>
                 ) : null}

@@ -1,16 +1,21 @@
 import React, { useCallback, useState } from 'react';
-import { View, Text, StyleSheet, FlatList, Modal, Alert, Share } from 'react-native';
+import { View, Text, StyleSheet, FlatList, Modal, Share } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { UsersAPI, type UserActivation } from '../api/endpoints';
 import { ROLES } from '../config/roles';
 import { colors, themeRef } from '../config/theme';
-import { Badge, EmptyState, ErrorBanner, Btn, Inp, Sel } from '../components/UI';
+import { Badge, EmptyState, ErrorBanner, Btn, Inp, Sel, showToast, SkeletonRows } from '../components/UI';
+import { showAlert, showConfirm, showError } from '../components/dialogs';
+import Icon from '../components/Icon';
 import type { User } from '../types';
 
-export default function UsuariosScreen() {
+export default function UsuariosScreen({ embedded = false }: { embedded?: boolean }) {
   const [users, setUsers] = useState<User[]>([]);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  // Solo la PRIMERA carga se esqueleta: tras crear o editar, `load()` vuelve a
+  // llamar y la lista ya está en pantalla — taparla un segundo sería peyor.
+  const [loading, setLoading] = useState(true);
 
   // Modal crear/editar
   const [modal, setModal] = useState(false);
@@ -30,6 +35,8 @@ export default function UsuariosScreen() {
       setUsers(list);
     } catch (err) {
       setError((err as Error).message);
+    } finally {
+      setLoading(false);
     }
   }, []);
 
@@ -50,12 +57,12 @@ export default function UsuariosScreen() {
   };
 
   const save = async () => {
-    if (!name || !email) return Alert.alert('Faltan datos', 'Complete nombre y correo');
+    if (!name || !email) return showError('Faltan datos: ' + 'Complete nombre y correo');
     setSaving(true);
     try {
       if (editTarget) {
         await UsersAPI.update(editTarget.id, { name, role });
-        Alert.alert('✓', 'Usuario actualizado');
+        showToast('Usuario actualizado', 'success');
         setModal(false);
       } else {
         // El backend NO recibe contraseña: el usuario la elige con el link que
@@ -70,7 +77,7 @@ export default function UsuariosScreen() {
       }
       load();
     } catch (err) {
-      Alert.alert('Error', (err as Error).message);
+      showError((err as Error).message);
     } finally {
       setSaving(false);
     }
@@ -82,7 +89,7 @@ export default function UsuariosScreen() {
       const res = await UsersAPI.resendSetPassword(u.id);
       setLinkInfo({ name: u.name, setPasswordUrl: res?.setPasswordUrl, emailSent: res?.emailSent });
     } catch (err) {
-      Alert.alert('Error', (err as Error).message);
+      showError((err as Error).message);
     } finally {
       setResendingId(null);
     }
@@ -96,20 +103,14 @@ export default function UsuariosScreen() {
     try {
       await Share.share({ message: link, title: 'Link para establecer contraseña' });
     } catch {
-      Alert.alert('Link de activación', link);
+      showAlert(link, 'Link de activación');
     }
   };
 
-  const deactivate = (u: User) => {
-    Alert.alert('Desactivar usuario', `Desactivar a ${u.name}?`, [
-      { text: 'Cancelar', style: 'cancel' },
-      {
-        text: 'Desactivar', style: 'destructive', onPress: async () => {
-          try { await UsersAPI.remove(u.id); load(); }
-          catch (err) { Alert.alert('Error', (err as Error).message); }
-        },
-      },
-    ]);
+  const deactivate = async (u: User) => {
+    if (!(await showConfirm(`¿Desactivar a ${u.name}?`))) return;
+    try { await UsersAPI.remove(u.id); load(); }
+    catch (err) { showError((err as Error).message); };
   };
 
   return (
@@ -117,13 +118,19 @@ export default function UsuariosScreen() {
       {/* Header — igual que la web: título + botón Nuevo Usuario */}
       <View style={styles.header}>
         <View style={{ flexShrink: 1 }}>
-          <Text style={styles.title}>Usuarios</Text>
+          {!embedded && <Text style={styles.title}>Usuarios</Text>}
           <Text style={styles.subtitle}>{users.length} usuarios</Text>
         </View>
         <Btn icon="plus" label="Nuevo Usuario" onPress={openNew} />
       </View>
       <ErrorBanner message={error} />
 
+      {/* Filas con borde, igual que las reales (nombre, correo, badges de rol y
+          estado, y los botones de acción) — dentro del mismo contenedor, así que
+          la prop `embedded` y el header siguen mandando sobre el diseño. */}
+      {loading ? (
+        <SkeletonRows n={6} h={80} />
+      ) : (
       <FlatList
         data={users}
         keyExtractor={(u) => u.id}
@@ -137,16 +144,16 @@ export default function UsuariosScreen() {
               <View style={{ flexDirection: 'row', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
                 <Badge label={ROLES[item.role]?.label || item.role} color={ROLES[item.role]?.color} />
                 {item.active === false ? (
-                  <Badge label="Inactivo (baja)" color="#DC2626" />
+                  <Badge label="Inactivo (baja)" color={colors.danger} />
                 ) : item.pending ? (
-                  <Badge label="Pendiente de activar" color="#F97316" />
+                  <Badge label="Pendiente de activar" color={colors.warning} />
                 ) : (
-                  <Badge label="Activo" color="#10B981" />
+                  <Badge label="Activo" color={colors.success} />
                 )}
               </View>
               <View style={{ flexDirection: 'row', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
                 <Btn variant="ghost" label="Editar" onPress={() => openEdit(item)} style={{ paddingVertical: 4, paddingHorizontal: 8 }} />
-                <Btn variant="ghost" label={resendingId === item.id ? '...' : '🔗 Link'} onPress={() => resendLink(item)} disabled={resendingId === item.id} style={{ paddingVertical: 4, paddingHorizontal: 8 }} />
+                <Btn variant="ghost" icon="link" label={resendingId === item.id ? '...' : 'Link'} onPress={() => resendLink(item)} disabled={resendingId === item.id} style={{ paddingVertical: 4, paddingHorizontal: 8 }} />
                 {item.active !== false && (
                   <Btn variant="danger" label="Dar de baja" onPress={() => deactivate(item)} style={{ paddingVertical: 4, paddingHorizontal: 8 }} />
                 )}
@@ -155,6 +162,7 @@ export default function UsuariosScreen() {
           </View>
         )}
       />
+      )}
 
       {/* Modal crear/editar — mismos campos que la web */}
       <Modal visible={modal} transparent animationType="fade" onRequestClose={() => setModal(false)}>
@@ -213,7 +221,7 @@ export default function UsuariosScreen() {
               <Text style={styles.linkBox} selectable>{linkInfo.setPasswordUrl}</Text>
             ) : (
               <Text style={styles.hint}>
-                El backend no devolvió el link. Use "🔗 Link" de nuevo para reenviarlo.
+                El backend no devolvió el link. Use "Link" de nuevo para reenviarlo.
               </Text>
             )}
             <View style={styles.modalActions}>

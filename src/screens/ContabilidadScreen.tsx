@@ -1,17 +1,16 @@
 import React, { useCallback, useState } from 'react';
-import {
-  View, Text, StyleSheet, FlatList, TextInput,
-  TouchableOpacity, Alert, Modal, ScrollView,
-} from 'react-native';
+import { View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, Modal, ScrollView } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { AccountingAPI, ExpensesAPI } from '../api/endpoints';
 import { useAuth } from '../context/AuthContext';
 import { colors, themeRef } from '../config/theme';
 import { PAY_METHODS, EXPENSE_CATS } from '../config/roles';
-import { EmptyState, ErrorBanner, Badge, Btn, Inp, Sel, PageHeader } from '../components/UI';
+import { EmptyState, ErrorBanner, Badge, Btn, Inp, Sel, PageHeader, Skeleton, SkeletonRows } from '../components/UI';
 import Icon from '../components/Icon';
 import { shareCSV } from '../utils/csv';
 import type { AccountingSummary, IncomeRow, Expense } from '../types';
+import { showError } from '../components/dialogs';
+import { cacheContabilidad, getOfflineContabilidad } from '../offline/offlineStore';
 
 const fmt = (n: number) => Number(n || 0).toFixed(2);
 const today = () => new Date().toISOString().split('T')[0];
@@ -29,6 +28,10 @@ export default function ContabilidadScreen() {
   // Informe Fiscal en-app (paridad con la web): capa a pantalla completa con
   // botón "← Volver" — nunca una pestaña huérfana.
   const [showInforme, setShowInforme] = useState(false);
+  // Esqueleto de la PRIMERA carga solamente: en los refrescos posteriores los
+  // movimientos ya están en pantalla, y taparlos con un placeholder sería un
+  // retroceso (la lista desaparecería un instante para volver).
+  const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
     try {
@@ -43,8 +46,22 @@ export default function ContabilidadScreen() {
       setSummary(sum);
       setIncome(inc);
       setExpenses(exp);
+      void cacheContabilidad({ sum, inc, exp }).catch(() => {});
     } catch (err) {
-      setError((err as Error).message);
+      // Sin red se enseña el último resumen guardado, marcado como tal. Un saldo
+      // contable sin avisar de que es viejo se lee como el saldo de hoy, que es justo
+      // el error que hace cerrar un mes con cifras equivocadas.
+      const local = await getOfflineContabilidad();
+      if (local) {
+        setSummary(local.sum as AccountingSummary);
+        setIncome(local.inc as IncomeRow[]);
+        setExpenses(local.exp as Expense[]);
+        setError('Sin conexión con el servidor — mostrando el resumen guardado en este dispositivo');
+      } else {
+        setError((err as Error).message);
+      }
+    } finally {
+      setLoading(false);
     }
   }, []);
 
@@ -55,7 +72,7 @@ export default function ContabilidadScreen() {
   const net = summary ? Number(summary.netProfit) : totalIncome - totalExp;
 
   const addExpense = async () => {
-    if (!form.concept || !form.amount) return Alert.alert('Error', 'Complete concepto y monto');
+    if (!form.concept || !form.amount) return showError('Complete concepto y monto');
     setSaving(true);
     try {
       await ExpensesAPI.create({ ...form, amount: Number(form.amount) });
@@ -63,7 +80,7 @@ export default function ContabilidadScreen() {
       setForm({ date: today(), concept: '', amount: '', category: 'Compras', method: 'efectivo' });
       load();
     } catch (e) {
-      Alert.alert('Error', (e as Error).message);
+      showError((e as Error).message);
     } finally {
       setSaving(false);
     }
@@ -133,9 +150,29 @@ export default function ContabilidadScreen() {
       </View>
 
       {tab === 'resumen' && (
+        loading ? (
+        <ScrollView contentContainerStyle={{ padding: 12 }}>
+          {/* La caja real del resumen: título y tres filas de etiqueta + importe,
+              con el botón de debajo. Se esboza a la misma altura para que al
+              llegar los datos no se mueva ni una línea. */}
+          <View style={styles.summaryBox}>
+            <Skeleton w="35%" h={15} r={7} />
+            {[0, 1, 2].map((i) => (
+              <View key={i} style={styles.summaryRow}>
+                <Skeleton w="34%" h={14} />
+                <Skeleton w="26%" h={14} />
+              </View>
+            ))}
+          </View>
+          <Skeleton h={48} r={14} />
+        </ScrollView>
+        ) : (
         <ScrollView contentContainerStyle={{ padding: 12 }}>
           <View style={styles.summaryBox}>
-            <Text style={styles.summaryTitle}>📋 Resumen</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+        <Icon name="clipboard" size={15} color={colors.textMuted} />
+        <Text style={styles.summaryTitle}>Resumen</Text>
+      </View>
             {[
               ['Ingresos brutos', totalIncome, colors.success],
               ['Total egresos', totalExp, colors.danger],
@@ -151,9 +188,15 @@ export default function ContabilidadScreen() {
             <Text style={styles.addBtnText}>+ Registrar Egreso</Text>
           </TouchableOpacity>
         </ScrollView>
+        )
       )}
 
       {tab === 'ingresos' && (
+        // Cada fila real es una tarjeta con concepto a la izquierda e importe a
+        // la derecha: `SkeletonRows` repite justo esa tarjeta con borde.
+        loading ? (
+          <SkeletonRows n={5} h={62} />
+        ) : (
         <FlatList
           data={income}
           keyExtractor={s => s.id}
@@ -169,9 +212,15 @@ export default function ContabilidadScreen() {
             </View>
           )}
         />
+        )
       )}
 
       {tab === 'gastos' && (
+        // Misma forma que la pestaña de ingresos: la categoría y el método de
+        // pago viajan en la segunda línea del esqueleto.
+        loading ? (
+          <SkeletonRows n={5} h={62} />
+        ) : (
         <FlatList
           data={expenses}
           keyExtractor={e => e.id}
@@ -182,7 +231,7 @@ export default function ContabilidadScreen() {
               <View style={{ flex: 1 }}>
                 <Text style={styles.rowPrimary}>{e.concept}</Text>
                 <View style={{ flexDirection: 'row', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
-                  <Badge label={e.category || '—'} color="#5a3a1a" />
+                  <Badge label={e.category || '—'} color={colors.category} />
                   <Badge label={PAY_METHODS.find(p => p.id === e.method)?.label || e.method || '—'} color={colors.primary} />
                 </View>
               </View>
@@ -190,6 +239,7 @@ export default function ContabilidadScreen() {
             </View>
           )}
         />
+        )
       )}
 
       {modal && (
@@ -246,7 +296,7 @@ const createStyles = () => StyleSheet.create({
     backgroundColor: colors.bgSecondary, borderWidth: 1, borderColor: colors.border,
     borderRadius: 10, paddingVertical: 8, paddingHorizontal: 14,
   },
-  informeBackText: { color: colors.text, fontWeight: '700', fontSize: 13.5 },
+  informeBackText: { color: colors.text, fontWeight: '700', fontSize: 14 },
   informeCard: {
     backgroundColor: colors.bgCard, borderWidth: 1, borderColor: colors.border,
     borderRadius: 14, padding: 16,
@@ -255,21 +305,21 @@ const createStyles = () => StyleSheet.create({
   informeSub: { fontSize: 12, color: colors.textMuted, marginBottom: 16 },
   informeBox: { borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 12, marginBottom: 14 },
   informeRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: colors.borderLight },
-  informeLabel: { fontSize: 13.5, flex: 1, color: colors.text },
-  informeValue: { fontSize: 13.5, fontWeight: '700', marginLeft: 10 },
-  informeDetTitle: { fontSize: 13.5, fontWeight: '800', color: colors.text, marginBottom: 4 },
-  informeEmpty: { fontSize: 12.5, color: colors.textMuted, fontStyle: 'italic', paddingVertical: 8 },
+  informeLabel: { fontSize: 14, flex: 1, color: colors.text },
+  informeValue: { fontSize: 14, fontWeight: '700', marginLeft: 10 },
+  informeDetTitle: { fontSize: 14, fontWeight: '800', color: colors.text, marginBottom: 4 },
+  informeEmpty: { fontSize: 12, color: colors.textMuted, fontStyle: 'italic', paddingVertical: 8 },
   informeNote: { fontSize: 11, color: colors.textMuted, marginTop: 14, borderTopWidth: 1, borderTopColor: colors.borderLight, paddingTop: 10, lineHeight: 16 },
   csvBtn: { backgroundColor: colors.primaryTint, borderWidth: 1, borderColor: colors.primaryTintB, borderRadius: 10, paddingVertical: 9, alignItems: 'center', marginHorizontal: 12, marginBottom: 10 },
   csvBtnText: { color: colors.primary, fontWeight: '700', fontSize: 13 },
   tabRow: { flexDirection: 'row', backgroundColor: colors.inputBg, marginHorizontal: 16, borderRadius: 12, padding: 4, alignSelf: 'flex-start' },
-  tabBtn: { paddingVertical: 7, paddingHorizontal: 16, alignItems: 'center', borderRadius: 7 },
+  tabBtn: { paddingVertical: 7, paddingHorizontal: 16, alignItems: 'center', borderRadius: 8 },
   tabBtnActive: { backgroundColor: colors.primary },
   tabText: { fontSize: 13, fontWeight: '600', color: colors.textMuted },
   tabTextActive: { color: '#fff' },
   summaryBox: { backgroundColor: colors.bgCard, borderRadius: 12, borderWidth: 1, borderColor: colors.border, padding: 16, marginBottom: 12 },
   summaryTitle: { fontWeight: '700', fontSize: 15, color: colors.text, marginBottom: 12 },
-  summaryRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#E2E8F0' },
+  summaryRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.text },
   summaryLabel: { fontSize: 14, color: colors.text },
   summaryValue: { fontSize: 14, fontWeight: '700' },
   addBtn: { backgroundColor: colors.primary, borderRadius: 14, paddingVertical: 13, alignItems: 'center' },

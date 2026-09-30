@@ -1,15 +1,20 @@
 import React, { useCallback, useState } from 'react';
-import {
-  View, Text, StyleSheet, FlatList, TextInput,
-  TouchableOpacity, Modal, Alert, ScrollView,
-} from 'react-native';
+import { View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, Modal, ScrollView } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { ClosingAPI, LocationsAPI } from '../api/endpoints';
 import { useAuth } from '../context/AuthContext';
 import { colors, themeRef } from '../config/theme';
-import { Badge, EmptyState, ErrorBanner, Spinner, Btn, PageHeader } from '../components/UI';
+import { Badge, EmptyState, ErrorBanner, Skeleton, Btn, PageHeader, showToast } from '../components/UI';
+import DineroCierre, { countedCashDe, hayConteo, type ContadoTexto } from '../components/DineroCierre';
+import ClosingResolve from '../components/ClosingResolve';
 import Icon from '../components/Icon';
 import type { Closing, ClosingItem, ClosingPreview, InventoryReading, Location } from '../types';
+import { showError } from '../components/dialogs';
+import {
+  cacheClosings, getOfflineClosings,
+  cacheReadings, getOfflineReadings,
+  cacheLocations, getOfflineLocations,
+} from '../offline/offlineStore';
 
 const fmt = (n: number) => new Intl.NumberFormat('es-CU', { minimumFractionDigits: 2 }).format(n || 0);
 const fmtDate = (d: string) =>
@@ -31,6 +36,15 @@ export default function CierreCajaScreen() {
   const [selectedReading, setSelectedReading] = useState<InventoryReading | null>(null);
   const [preview, setPreview] = useState<ClosingPreview | null>(null);
   const [validatedItems, setValidatedItems] = useState<Record<string, string>>({});
+  // El dinero contado, por moneda. ARRANCA VACÍO a propósito: solo se envía al
+  // backend lo que el cajero escribió de verdad. Mandar ceros por defecto
+  // inventaría un descuadre del 100% en cada moneda con saldo.
+  const [contado, setContado] = useState<ContadoTexto>({});
+  // El instante REAL del conteo, no el del envío. Sin conexión puede pasar una
+  // hora entre que se cuenta y se sube, y de ese instante depende la ventana
+  // para explicar el descuadre: por eso se captura al empezar a escribir, no al
+  // confirmar.
+  const [contadoAt, setContadoAt] = useState<number | null>(null);
   const [detailClosing, setDetailClosing] = useState<Closing | null>(null);
   const [confirmReading, setConfirmReading] = useState(false);
   const [notes, setNotes] = useState('');
@@ -38,14 +52,26 @@ export default function CierreCajaScreen() {
 
   const locationName = (id?: string) => locations.find((l) => l.id === id)?.name || '—';
 
+  // Servidor primero, caché después. El orden importa: la caché puede tener la
+  // última versión buena, y entrar por ella solo añadiría latencia cuando hay
+  // red. Lo que cambia es que sin red se pinta la copia local en vez de un
+  // error: sin esta segunda parte no había forma de consultar un cierre, y el
+  // cajero se quedaba sin poder ver el descuadre que tenía delante.
   const loadClosings = useCallback(async () => {
     try {
       setError('');
       setLoading(true);
       const list = await ClosingAPI.list();
       setClosings(list);
+      void cacheClosings(list).catch(() => {});
     } catch (e) {
-      setError((e as Error).message);
+      const local = await getOfflineClosings();
+      if (local.length > 0) {
+        setClosings(local);
+        setError('Sin conexión con el servidor — mostrando los cierres guardados en este dispositivo');
+      } else {
+        setError((e as Error).message);
+      }
     } finally {
       setLoading(false);
     }
@@ -54,7 +80,15 @@ export default function CierreCajaScreen() {
   useFocusEffect(
     useCallback(() => {
       loadClosings();
-      LocationsAPI.list().then(setLocations).catch(() => {});
+      LocationsAPI.list()
+        .then((locs) => {
+          setLocations(locs);
+          void cacheLocations(locs).catch(() => {});
+        })
+        .catch(async () => {
+          const local = await getOfflineLocations();
+          if (local.length > 0) setLocations(local);
+        });
     }, [loadClosings]),
   );
 
@@ -63,9 +97,20 @@ export default function CierreCajaScreen() {
       setError('');
       const list = await ClosingAPI.readings();
       setReadings(list);
+      void cacheReadings(list).catch(() => {});
       setView('selectReading');
     } catch (e) {
-      setError((e as Error).message);
+      // Las lecturas de apertura son la BASE del conteo. Sin copia local no se
+      // puede ni siquiera empezar a cerrar sin red, que es exactamente lo que
+      // pasaba: la caja no tenía ninguna hasta que alguien entraba aquí con red.
+      const local = await getOfflineReadings();
+      if (local.length > 0) {
+        setReadings(local);
+        setError('Sin conexión — usando las lecturas guardadas en este dispositivo');
+        setView('selectReading');
+      } else {
+        setError('Sin conexión y sin lecturas guardadas. Conéctate una vez para poder cerrar sin internet después.');
+      }
     }
   };
 
@@ -78,12 +123,22 @@ export default function CierreCajaScreen() {
       const init: Record<string, string> = {};
       for (const item of data.items) init[item.productId] = String(item.stockValidated);
       setValidatedItems(init);
+      // Cada lectura arranca con su conteo: el dinero se cuenta en la caja, en
+      // un momento concreto, y arrastrar el conteo de otro conteo inventaría
+      // un descuadre.
+      setContado({});
+      setContadoAt(null);
       setView('validate');
     } catch (e) {
-      Alert.alert('Error', (e as Error).message);
+      showError((e as Error).message);
     } finally {
       setSaving(false);
     }
+  };
+
+  const onContadoChange = (next: ContadoTexto) => {
+    if (contadoAt === null) setContadoAt(Date.now());
+    setContado(next);
   };
 
   const confirmClosing = async () => {
@@ -94,28 +149,40 @@ export default function CierreCajaScreen() {
         productId,
         stockValidated: Number(v) || 0,
       }));
-      await ClosingAPI.confirm({ initialReadingId: selectedReading.id, items, notes: notes || undefined });
-      Alert.alert('✓', 'Cierre registrado correctamente');
+      // El dinero va en el MISMO POST que el inventario. Es lo que faltaba:
+      // sin countedCash el backend conciliaba contra un conteo vacío y cada
+      // cierre hecho desde el teléfono salía money-blind.
+      const conDinero = hayConteo(contado);
+      await ClosingAPI.confirm({
+        initialReadingId: selectedReading.id,
+        items,
+        notes: notes || undefined,
+        countedCash: conDinero ? countedCashDe(contado) : {},
+        countedAt: conDinero ? new Date(contadoAt ?? Date.now()).toISOString() : undefined,
+      });
+      showToast('Cierre registrado correctamente', 'success');
       setView('list');
       setPreview(null);
       setNotes('');
+      setContado({});
+      setContadoAt(null);
       loadClosings();
     } catch (e) {
-      Alert.alert('Error', (e as Error).message);
+      showError((e as Error).message);
     } finally {
       setSaving(false);
     }
   };
 
   const takeReading = async () => {
-    if (!readingLocationId) return Alert.alert('Error', 'Selecciona la ubicación');
+    if (!readingLocationId) return showError('Selecciona la ubicación');
     try {
       setSaving(true);
       await ClosingAPI.takeReading(readingLocationId, 'Lectura de apertura manual');
-      Alert.alert('✓', 'Lectura de inventario tomada');
+      showToast('Lectura de inventario tomada', 'success');
       setConfirmReading(false);
     } catch (e) {
-      Alert.alert('Error', (e as Error).message);
+      showError((e as Error).message);
     } finally {
       setSaving(false);
     }
@@ -138,18 +205,50 @@ export default function CierreCajaScreen() {
 
         <ErrorBanner message={error} />
 
-        {loading ? <Spinner /> : (
+        {/* El spinner centrado dejaba la pantalla en blanco dos segundos, que es
+            justo lo que hace que una app lenta parezca rota. En su lugar se
+            dibujan tres tarjetas con la FORMA de las reales —fecha y quién
+            cerró a la izquierda, badges a la derecha, las tres cifras del
+            arqueo abajo—, para que cuando entra el primer cierre la lista no
+            salte de sitio. */}
+        {loading ? (
+          <View style={{ padding: 12, paddingBottom: 32 }}>
+            {[0, 1, 2].map((i) => (
+              <View key={i} style={styles.card}>
+                <View style={styles.cardTopRow}>
+                  <View style={{ flex: 1, gap: 7 }}>
+                    <Skeleton w={`${78 - i * 6}%`} h={14} />
+                    <Skeleton w="45%" h={11} />
+                    <Skeleton w="28%" h={11} />
+                  </View>
+                  <View style={{ gap: 4, alignItems: 'flex-end' }}>
+                    <Skeleton w={94} h={20} r={20} />
+                    <Skeleton w={72} h={20} r={20} />
+                  </View>
+                </View>
+                <View style={styles.cardStatsRow}>
+                  {[0, 1, 2].map((j) => (
+                    <View key={j} style={{ gap: 6 }}>
+                      <Skeleton w={64} h={10} />
+                      <Skeleton w={88} h={14} />
+                    </View>
+                  ))}
+                </View>
+              </View>
+            ))}
+          </View>
+        ) : (
           <FlatList
             data={closings}
             keyExtractor={(c) => c.id}
             contentContainerStyle={{ padding: 12, paddingBottom: 32 }}
-            ListEmptyComponent={<EmptyState icon="🧮" text="No hay cierres registrados aún" />}
+            ListEmptyComponent={<EmptyState icon="cierre" text="No hay cierres registrados aún" />}
             renderItem={({ item: c }) => {
               const hasShortage = (c.items || []).some((i) => i.shortage > 0.001);
               return (
                 <TouchableOpacity
                   style={styles.card}
-                  onPress={() => { setDetailClosing(c); setView('detail'); }}
+                  onPress={() => { void openDetail(c); }}
                 >
                   <View style={styles.cardTopRow}>
                     <View style={{ flex: 1 }}>
@@ -160,7 +259,12 @@ export default function CierreCajaScreen() {
                       <Text style={styles.cardLoc}>{locationName(c.locationId)}</Text>
                     </View>
                     <View style={{ gap: 4, alignItems: 'flex-end' }}>
-                      {hasShortage && <Badge label="⚠ Faltantes" color="#F97316" />}
+                      {/* Un cierre provisional tiene un plazo corriendo: quien
+                          lo ve desde la lista debería saber que hay algo que
+                          explicar, no descubrirlo al abrirlo. */}
+                      {c.status === 'provisional' && <Badge icon="clock" label="Provisional" color={colors.warning} />}
+                      {c.status === 'resuelto' && <Badge icon="check" label="Resuelto" color={colors.success} />}
+                      {hasShortage && <Badge icon="alert" label="Faltantes" color={colors.warning} />}
                       <Badge label={`${c.totalSales} ventas`} color={colors.primary} />
                     </View>
                   </View>
@@ -205,7 +309,10 @@ export default function CierreCajaScreen() {
                 </ScrollView>
               ) : null}
               <View style={styles.warnBox}>
-                <Text style={styles.warnTitle}>⚠ Antes de continuar</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <Icon name="alert" size={15} color={colors.warning} />
+            <Text style={styles.warnTitle}>Antes de continuar</Text>
+          </View>
                 <Text style={styles.warnText}>
                   • Registrará el stock actual de esa ubicación como punto de partida del próximo cierre.{'\n'}
                   • Si hay ventas sin cerrar quedarán FUERA del período.{'\n'}
@@ -309,17 +416,43 @@ export default function CierreCajaScreen() {
           </Text>
         </View>
 
+        <View style={styles.dinero}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <Icon name="cash" size={15} color={colors.primary} />
+            <Text style={styles.dineroTitle}>Contar el dinero de la caja</Text>
+          </View>
+          <Text style={styles.infoText}>
+            Es opcional: si no escribes nada aquí, el cierre se guarda solo con la mercancía.
+          </Text>
+        </View>
+
         <FlatList
           data={preview.items}
           keyExtractor={(i) => i.productId}
           contentContainerStyle={{ padding: 12, paddingBottom: 12 }}
           ListEmptyComponent={<EmptyState text="Sin productos en esta lectura" />}
+          // El dinero va PRIMERO, en la cabecera. Es lo que se cuenta con las
+          // manos vacías sobre la caja, y lo que más caro sale cuando falta.
+          ListHeaderComponent={
+            <View style={styles.dinero}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <Icon name="cash" size={15} color={colors.primary} />
+            <Text style={styles.dineroTitle}>Contar el dinero de la caja</Text>
+          </View>
+              <DineroCierre
+                preview={preview.cash}
+                contado={contado}
+                onChange={onContadoChange}
+                baseCash={preview.baseCash}
+              />
+            </View>
+          }
           renderItem={({ item }) => {
             const validated = validatedItems[item.productId] ?? String(item.stockValidated);
             const shortage = Number((item.stockExpected - (Number(validated) || 0)).toFixed(3));
             const hasS = shortage > 0.001;
             return (
-              <View style={[styles.validateRow, hasS && { backgroundColor: '#FFF7ED' }]}>
+              <View style={[styles.validateRow, hasS && { backgroundColor: colors.warningBg }]}>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.validateName}>{item.productName}</Text>
                   <Text style={styles.cardSub}>
@@ -337,8 +470,8 @@ export default function CierreCajaScreen() {
                     />
                     <Text style={styles.cardSub}>{item.unit}</Text>
                   </View>
-                  <Text style={{ fontWeight: '800', fontSize: 12, color: hasS ? '#F97316' : '#10B981' }}>
-                    {hasS ? `-${shortage} ${item.unit}` : '✓'}
+                  <Text style={{ fontWeight: '800', fontSize: 12, color: hasS ? colors.warning : colors.success }}>
+                    {hasS ? `-${shortage} ${item.unit}` : <Icon name="check" size={14} color={colors.success} />}
                   </Text>
                 </View>
               </View>
@@ -376,9 +509,49 @@ export default function CierreCajaScreen() {
   }
 
   // ── Detalle del cierre ─────────────────────────────────────────────────────
+  const openDetail = async (c: Closing) => {
+    setDetailClosing(c);
+    setView('detail');
+    // El detalle NO es la fila de la lista. `GET /closing` devuelve las filas
+    // crudas; solo `GET /closing/:id` añade `notas`, `explicaciones` y
+    // `pendientes` — ya descontado lo explicado. Sin esta llamada, la pantalla
+    // nunca puede decir si un cierre está resuelto, porque no tiene el dato.
+    try {
+      setDetailClosing(await ClosingAPI.detail(c.id));
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+
+  const explicar = async (currency: string, amount: number, note: string) => {
+    if (!detailClosing) return;
+    try {
+      await ClosingAPI.explain(detailClosing.id, { currency, amount, note });
+      // Se vuelve a pedir el detalle: el `status` cambia en el servidor según lo
+      // que quedaba por cuadrar, y recalcularlo aquí sería adivinar.
+      setDetailClosing(await ClosingAPI.detail(detailClosing.id));
+      await loadClosings();
+    } catch (e) {
+      // 400 = el importe no coincide EXACTO. 409 = el cierre ya no espera
+      // explicaciones. El mensaje del servidor dice cuál de las dos fue.
+      showError((e as Error).message);
+    }
+  };
+
+  const anotar = async (productId: string, note: string) => {
+    if (!detailClosing) return;
+    try {
+      await ClosingAPI.addNote(detailClosing.id, { productId, note });
+      setDetailClosing(await ClosingAPI.detail(detailClosing.id));
+    } catch (e) {
+      showError((e as Error).message);
+    }
+  };
+
   if (view === 'detail' && detailClosing) {
     const c = detailClosing;
     const hasShortage = (c.items || []).some((i: ClosingItem) => i.shortage > 0.001);
+    const provisional = c.status === 'provisional';
     return (
       <View style={styles.wrap}>
         <TouchableOpacity style={styles.backBtn} onPress={() => setView('list')}>
@@ -389,7 +562,12 @@ export default function CierreCajaScreen() {
           {fmtDate(c.createdAt)} · Cerrado por {c.closedBy?.name || '—'}
         </Text>
         <Text style={styles.cardSub}>Período: {fmtDate(c.periodStart)} → {fmtDate(c.periodEnd)}</Text>
-        {c.notes ? <Text style={styles.cardSub}>📝 {c.notes}</Text> : null}
+        {c.notes ? (
+                  <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 6 }}>
+                    <Icon name="doc" size={13} color={colors.textMuted} />
+                    <Text style={[styles.cardSub, { flex: 1 }]}>{c.notes}</Text>
+                  </View>
+                ) : null}
 
         <View style={styles.detailGrid}>
           <View style={styles.detailCard}>
@@ -410,9 +588,31 @@ export default function CierreCajaScreen() {
           </View>
         </View>
 
+        {/* Un cierre provisional no está cerrado: hay un plazo para explicar el
+            descuadre. Sin esta banda, un cajero que abre el cierre ve una lista
+            de productos y ninguna señal de que le faltan pesos por justificar. */}
+        {provisional && (
+          <ClosingResolve closing={c} onExplicar={explicar} onAnotar={anotar} />
+        )}
+
+        {/* Notas ya escritas: el relato de por qué faltó, con su autor. */}
+        {(c.notas || []).length > 0 && (
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>Notas de mercancía</Text>
+            {(c.notas || []).map((nta) => (
+              <Text key={nta.id} style={styles.cardSub}>
+                • {nta.productName}: “{nta.note}” — {nta.autor}
+              </Text>
+            ))}
+          </View>
+        )}
+
         {hasShortage && (
           <View style={styles.warnBox}>
-            <Text style={styles.warnText}>⚠ Este cierre registra faltantes de inventario</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <Icon name="alert" size={14} color={colors.warning} />
+            <Text style={styles.warnText}>Este cierre registra faltantes de inventario</Text>
+          </View>
           </View>
         )}
 
@@ -423,7 +623,7 @@ export default function CierreCajaScreen() {
           renderItem={({ item }) => {
             const hasS = item.shortage > 0.001;
             return (
-              <View style={[styles.validateRow, hasS && { backgroundColor: '#FFF7ED' }]}>
+              <View style={[styles.validateRow, hasS && { backgroundColor: colors.warningBg }]}>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.validateName}>{item.productName}</Text>
                   <Text style={styles.cardSub}>
@@ -431,8 +631,8 @@ export default function CierreCajaScreen() {
                   </Text>
                   <Text style={[styles.cardSub, { color: colors.success }]}>Ingreso: ${fmt(item.income)}</Text>
                 </View>
-                <Text style={{ fontWeight: '800', fontSize: 13, color: hasS ? '#F97316' : '#10B981' }}>
-                  {hasS ? `-${item.shortage}` : '✓'}
+                <Text style={{ fontWeight: '800', fontSize: 13, color: hasS ? colors.warning : colors.success }}>
+                  {hasS ? `-${item.shortage}` : <Icon name="check" size={14} color={colors.success} />}
                 </Text>
               </View>
             );
@@ -469,14 +669,16 @@ const createStyles = () => StyleSheet.create({
   readingTitle: { fontWeight: '700', fontSize: 14, color: colors.text },
   summaryInline: { flexDirection: 'row', justifyContent: 'space-around', backgroundColor: colors.primaryTint, borderRadius: 12, padding: 10, marginBottom: 10 },
   infoBox: { backgroundColor: colors.primaryTint, borderWidth: 1, borderColor: colors.primaryTintB, borderRadius: 12, padding: 10, marginBottom: 8 },
-  infoText: { fontSize: 12, color: '#1E40AF' },
+  infoText: { fontSize: 12, color: colors.primaryText },
+  dinero: { backgroundColor: colors.bgCard, borderRadius: 14, borderWidth: 1, borderColor: colors.border, padding: 14, marginBottom: 10, gap: 8 },
+  dineroTitle: { fontSize: 15, fontWeight: '800', color: colors.text },
   validateRow: { flexDirection: 'row', backgroundColor: colors.bgCard, borderRadius: 12, borderWidth: 1, borderColor: colors.border, padding: 12, marginBottom: 8, alignItems: 'center' },
   validateName: { fontWeight: '700', fontSize: 13, color: colors.text },
   validateInput: { borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingVertical: 4, paddingHorizontal: 8, width: 70, textAlign: 'right', fontSize: 14, color: colors.text, backgroundColor: colors.bgCard },
   notesInput: { borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 10, fontSize: 13, backgroundColor: colors.bgCard, color: colors.text, minHeight: 50, textAlignVertical: 'top', marginBottom: 10 },
-  warnBox: { backgroundColor: '#FFF7ED', borderWidth: 1, borderColor: '#FED7AA', borderRadius: 12, padding: 12, marginBottom: 10 },
-  warnTitle: { fontWeight: '700', color: '#C2410C', marginBottom: 6, fontSize: 13 },
-  warnText: { fontSize: 12, color: '#7C2D12', lineHeight: 18 },
+  warnBox: { backgroundColor: colors.warningBg, borderWidth: 1, borderColor: colors.warnBorder, borderRadius: 12, padding: 12, marginBottom: 10 },
+  warnTitle: { fontWeight: '700', color: colors.warningText, marginBottom: 6, fontSize: 13 },
+  warnText: { fontSize: 12, color: colors.warningText, lineHeight: 18 },
   detailGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginVertical: 10 },
   detailCard: { flexGrow: 1, minWidth: '45%', backgroundColor: colors.bgCard, borderRadius: 12, borderWidth: 1, borderColor: colors.border, padding: 12 },
   detailValue: { fontSize: 17, fontWeight: '800', color: colors.text, marginTop: 4 },

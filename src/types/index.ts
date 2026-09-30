@@ -160,6 +160,45 @@ export interface ClosingItem {
   income: number;
 }
 
+/**
+ * Una nota de mercancía sobre una línea que no cuadró.
+ *
+ * OJO, y es la diferencia más importante de todo este archivo: una NOTA no
+ * resuelve un cierre. Es el relato de por qué faltó, no una línea cuadrada. Por
+ * eso el backend las guarda en `closing_notes`, una tabla APARTE de
+ * `closing_explanations` (que sí resuelve dinero). Si la UI las presentara como
+ * la misma acción, alguien cerraría un descuadre creyéndolo resuelto cuando el
+ * sistema sigue diciendo que falta mercancía.
+ */
+export interface ClosingNote {
+  id: string;
+  productId: string;
+  productName: string;
+  qty: number;
+  note: string;
+  autor: string;
+  createdAt: string;
+}
+
+/** Una explicación de dinero: sí resuelve, y solo si coincide EXACTAMENTE. */
+export interface ClosingExplicacion {
+  id: string;
+  currency: string;
+  amount: number;
+  note: string;
+  autor: string;
+  createdAt: string;
+}
+
+export interface ClosingPendientes {
+  /** Descuadre por moneda que aún supera el margen y no está explicado. */
+  dinero: Record<string, number>;
+  /** Líneas de inventario que no cuadran, en cualquier sentido. */
+  mercaderia: { productId: string; productName: string; unit: string; shortage: number }[];
+}
+
+export type ClosingStatus = 'cerrado' | 'provisional' | 'resuelto';
+
 export interface Closing {
   id: string;
   companyId: string;
@@ -176,6 +215,39 @@ export interface Closing {
   items: ClosingItem[];
   notes?: string | null;
   createdAt: string;
+  // ── El dinero ────────────────────────────────────────────────────────────
+  // Antes el cierre solo miraba inventario: el dinero se registraba pero nunca
+  // se contaba, así que un faltante de 300 en la caja no era detectable. Estos
+  // campos son los que hacen que sea detectable, y son todos POR MONEDA
+  // (Record<string, number>): sumar currencies no significa nada.
+  /** Turno al que pertenece este cierre (dos turnos sobre la misma caja). */
+  shiftId?: string | null;
+  /** Fondo con el que se abrió el turno. */
+  baseCash?: Record<string, number>;
+  /** Momento del conteo. Sin conexión puede ser horas antes de subirlo. */
+  countedAt?: string | null;
+  /** Lo que el cajero contó de verdad. */
+  countedCash?: Record<string, number>;
+  /** Lo que DEBÍA haber: fondo + efectivo + entradas − salidas. */
+  expectedCash?: Record<string, number>;
+  /** contado − esperado. Vacío = cuadró. */
+  cashDiff?: Record<string, number>;
+  // ── El estado de la resolución ───────────────────────────────────────────
+  status?: ClosingStatus;
+  /** Cuándo vence la ventana para explicar. null si ya no está en espera. */
+  provisionalUntil?: string | null;
+  notas?: ClosingNote[];
+  explicaciones?: ClosingExplicacion[];
+  /** Lo que el servidor dice que SIGUE abierto. No se deduce en el cliente. */
+  pendientes?: ClosingPendientes;
+}
+
+export interface ClosingCashPreview {
+  base: Record<string, number>;
+  ventas: Record<string, number>;
+  entradas: Record<string, number>;
+  salidas: Record<string, number>;
+  esperado: Record<string, number>;
 }
 
 export interface ClosingPreview {
@@ -187,6 +259,67 @@ export interface ClosingPreview {
   incomeEfectivo: number;
   incomeTransferencia: number;
   items: ClosingItem[];
+  /** Lo que debería haber en la caja, por moneda. El contado aún va en blanco. */
+  cash?: ClosingCashPreview;
+  shiftId?: string | null;
+  baseCash?: Record<string, number>;
+}
+
+// ─── Turnos ─────────────────────────────────────────────────────────────────
+// Un turno es "esta persona, en esta caja, desde esta hora". La caja de trabajo
+// sale de aquí, no de "la caja cuyo dueño soy": las cajas son del negocio y las
+// pueden llevar varios.
+export interface Shift {
+  id: string;
+  locationId: string;
+  locationName: string;
+  startedAt: string;
+  openingReadingId?: string | null;
+  /** Con cuánto dinero arrancó la caja, por moneda. */
+  baseCash?: Record<string, number>;
+}
+
+/**
+ * Una caja que este usuario puede abrir turno en.
+ *
+ * OJO: el backend devuelve `{ id, name, type, active }`
+ * (getCajasAsignadas selecciona las cuatro columnas), no solo id y name. Aquí
+ * se declara el mínimo que la UI necesita y el resto llega sin estorbar.
+ */
+export interface AssignedCaja {
+  id: string;
+  name: string;
+  type?: string;
+  active?: boolean;
+}
+
+export interface ShiftCurrentResponse {
+  shift: Shift | null;
+  /**
+   * OJO con el nombre: es `assignedCajas`, NO `cajas`. Leer el nombre equivocado
+   * deja la lista vacía sin error visible, el prompt de abrir turno no se
+   * dispara nunca y el cajero con dos cajas vuelve a vender en la primera que
+   * aparezca. Es un fallo silencioso, por eso tiene test de contrato.
+   */
+  assignedCajas: AssignedCaja[];
+  /** Aviso del servidor, p. ej. que falta la migración 0012. */
+  aviso?: string | null;
+}
+
+// ─── Entradas y salidas de dinero de la caja ────────────────────────────────
+export interface CashMovement {
+  id: string;
+  locationId: string;
+  locationName?: string;
+  type: 'entrada' | 'salida';
+  amount: number;
+  currency: string;
+  reason?: string | null;
+  status: 'pendiente' | 'aprobada' | 'rechazada';
+  userName: string;
+  approvedAt?: string | null;
+  decisionNote?: string | null;
+  createdAt: string;
 }
 
 // ─── Transferencias / envíos de stock ──────────────────────────────────────
@@ -266,6 +399,33 @@ export interface PlanInfo {
     salesThisMonth: number;
   };
 }
+
+/**
+ * GET /subscription/status. Con estos dos datos el panel puede decir la verdad
+ * — "cancelado, te queda hasta el día X" — en vez de un mensaje ambiguo.
+ */
+export interface SubscriptionStatus {
+  plan: string;
+  planExpiry?: string | null;
+  subscriptionStatus?: string;
+  paymentMethod?: string | null;
+  qvapayAuthorized?: boolean;
+  lastPaymentDate?: string | null;
+  nextPaymentDate?: string | null;
+  failedAttempts?: number;
+  daysLeft: number | null;
+  isTrial: boolean;
+  isCancelled: boolean;
+  /** ¿Va a dejar de cobrarse solo? */
+  willRenew: boolean;
+}
+
+/**
+ * El margen de descuadre que el negocio acepta. NO es una preferencia de la
+ * plataforma: cada caja tiene su ruido de billetes sueltos, y un margen
+ * absoluto solo tiene sentido en la moneda para la que el dueño lo puso.
+ */
+export type CashToleranceMode = 'absoluto' | 'porcentaje';
 
 // El login real del backend devuelve accessToken (corta duración) +
 // refreshToken + user. El registro actual devuelve un único `token` y ningún

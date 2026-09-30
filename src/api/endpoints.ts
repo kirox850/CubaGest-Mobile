@@ -3,6 +3,8 @@ import type {
   AuthResponse, User, Product, Sale, Expense, PlanInfo,
   DashboardSummary, Location, LocationStock, Closing, InventoryReading,
   ClosingPreview, Transfer, AuditLog, AccountingSummary, IncomeRow,
+  CashMovement, Shift, ShiftCurrentResponse, AssignedCaja,
+  CashToleranceMode, SubscriptionStatus,
 } from '../types';
 
 export const AuthAPI = {
@@ -36,19 +38,32 @@ export const PlanAPI = {
 };
 
 export const SubscriptionAPI = {
-  status: (): Promise<unknown> => apiFetch('/subscription/status'),
+  status: (): Promise<SubscriptionStatus> => apiFetch('/subscription/status'),
   authorizeQvapay: (plan: string): Promise<{ url?: string }> =>
     apiFetch('/subscription/authorize', { method: 'POST', body: { plan } }),
-  // NO hay `cancel`: el backend expone /status, /, /whatsapp, /authorize y
-  // /qvapay-callback — no existe DELETE /subscription/cancel. Antes había aquí
-  // un stub que apuntaba a una ruta inexistente (cualquier botón que lo
-  // usara recibiría 404). El plan es explícito: la UI de cancelación se añade
-  // SOLO cuando exista la ruta; mientras tanto se gestiona con soporte.
+  // Cancelar la suscripción. La ruta EXISTE (subscriptions.ts:78) y es solo
+  // admin; el footer de PlanModal ya prometía "puedes cancelar en cualquier
+  // momento" sin ninguna forma de hacerlo, y eso es un problema legal, no una
+  // molestia.
+  //
+  // NO quita el plan al instante: deja el acceso hasta el fin del periodo ya
+  // pagado (`accessUntil`) y a partir de ahí vuelve a free sola, sin cobrar
+  // nada más. Cancelar hoy lo que ya se pagó sería lo contrario de lo que la
+  // gente espera al cancelar.
+  cancel: (): Promise<{ subscriptionStatus: string; planExpiry?: string | null; accessUntil?: string | null; alreadyCancelled?: boolean }> =>
+    apiFetch('/subscription/cancel', { method: 'POST' }),
 };
 
 export const LocationsAPI = {
   list: (): Promise<Location[]> => apiFetch('/locations'),
   stock: (id: string): Promise<LocationStock> => apiFetch(`/locations/${id}/stock`),
+  // Cajas que un admin puede ASIGNAR (cajas de la empresa, sin almacén).
+  assignable: (): Promise<{ id: string; name: string; active: boolean }[]> =>
+    apiFetch('/locations/assignables'),
+  // Crear una caja. Solo admin (requireRole("admin") en locations.ts). El
+  // backend normaliza `type`: cualquier cosa que no sea "almacen" es "caja".
+  create: (body: { name: string; type: 'caja' }): Promise<Location> =>
+    apiFetch('/locations', { method: 'POST', body: body as unknown as Record<string, unknown> }),
   // Ajuste de stock en UNA ubicación puntual. OJO: el viejo
   // POST /products/:id/adjust-stock ya NO existe en el backend — por eso el
   // ajuste desde la app siempre fallaba. El backend real es /locations/:id/adjust.
@@ -68,9 +83,9 @@ export const DashboardAPI = {
 
 // ─── Config de empresa: monedas y tasa de cambio (Fase 4) ─────────────────
 export const SettingsAPI = {
-  get: (): Promise<{ currencies: string[]; rateMode: 'manual' | 'eltoque'; manualRates: Record<string, number>; rates: Record<string, number>; ratesUpdatedAt?: string }> =>
+  get: (): Promise<{ currencies: string[]; rateMode: 'manual' | 'eltoque'; manualRates: Record<string, number>; rates: Record<string, number>; ratesUpdatedAt?: string; cashToleranceMode?: CashToleranceMode; cashToleranceValue?: number; cashRequireApproval?: boolean }> =>
     apiFetch('/settings'),
-  update: (body: { currencies?: string[]; rateMode?: 'manual' | 'eltoque'; manualRates?: Record<string, number> }): Promise<unknown> =>
+  update: (body: { currencies?: string[]; rateMode?: 'manual' | 'eltoque'; manualRates?: Record<string, number>; cashToleranceMode?: CashToleranceMode; cashToleranceValue?: number; cashRequireApproval?: boolean }): Promise<unknown> =>
     apiFetch('/settings', { method: 'PUT', body }),
 };
 
@@ -167,14 +182,60 @@ export const UsersAPI = {
 
 export const ClosingAPI = {
   list: (): Promise<Closing[]> => apiFetch('/closing'),
+  // El detalle NO es una fila de la lista: solo GET /closing/:id añade `notas`,
+  // `explicaciones` y `pendientes` (ya descontado lo explicado). La lista
+  // devuelve las filas crudas, así que una pantalla que se apoye en `list()`
+  // para pintar el detalle nunca verá si el cierre está resuelto.
   detail: (id: string): Promise<Closing> => apiFetch(`/closing/${id}`),
   readings: (): Promise<InventoryReading[]> => apiFetch('/closing/readings'),
   takeReading: (locationId: string, notes?: string): Promise<InventoryReading> =>
     apiFetch('/closing/readings', { method: 'POST', body: { locationId, notes } }),
   preview: (initialReadingId: string): Promise<ClosingPreview> =>
     apiFetch(`/closing/preview/${initialReadingId}`),
-  confirm: (body: { initialReadingId: string; items: { productId: string; stockValidated: number }[]; notes?: string }): Promise<Closing> =>
+  // `countedCash` y `countedAt` son lo que convierte esto en un cierre de dinero
+  // y no solo de inventario. Antes no se mandaban: cada cierre hecho desde el
+  // teléfono era money-blind — merchandise-only — y el backend lo aceptaba por
+  // cortesía con un cliente "que precede a esta pantalla" (ver closing.ts).
+  // `countedCash` es POR MONEDA y `countedAt` es el instante REAL del conteo:
+  // sin conexión puede ser horas anterior a cuando se sube, y de eso depende
+  // la ventana para explicar el descuadre.
+  confirm: (body: {
+    initialReadingId: string;
+    items: { productId: string; stockValidated: number }[];
+    notes?: string;
+    countedCash?: Record<string, number>;
+    countedAt?: string;
+  }): Promise<Closing> =>
     apiFetch('/closing/confirm', { method: 'POST', body }),
+  // Explicar un descuadre de DINERO. La cantidad tiene que coincidir con el
+  // descuadre EXACTO (el servidor rechaza con 400 AMOUNT_MISMATCH si no), y la
+  // nota no puede estar vacía. Respuesta 409 = el cierre ya no está esperando
+  // explicaciones.
+  explain: (id: string, body: { currency: string; amount: number; note: string }): Promise<{ status?: string; pendientes?: unknown }> =>
+    apiFetch(`/closing/${id}/explain`, { method: 'POST', body }),
+  // Anotar una línea de MERCADERÍA. Esto NO resuelve el cierre: dice por qué
+  // faltó, y vive en otra tabla (`closing_notes`) precisamente para que no
+  // pueda confundirse con una explicación de dinero.
+  addNote: (id: string, body: { productId: string; note: string }): Promise<unknown> =>
+    apiFetch(`/closing/${id}/note`, { method: 'POST', body }),
+};
+
+// ─── Turnos ──────────────────────────────────────────────────────────────────
+// Contrato verificado contra src/routes/shifts.ts:
+//  - GET /shift/current → { shift, assignedCajas, aviso }  ← assignedCajas, NO cajas
+//  - POST /shift/start  → { shift }  (crea la lectura de apertura en el servidor)
+//  - POST /shift/end    → { closed }
+export const ShiftAPI = {
+  current: (): Promise<ShiftCurrentResponse> => apiFetch('/shift/current'),
+  start: (locationId: string, baseCash?: Record<string, number>): Promise<{ shift: Shift }> =>
+    apiFetch('/shift/start', { method: 'POST', body: { locationId, baseCash } }),
+  end: (): Promise<{ closed: string }> => apiFetch('/shift/end', { method: 'POST' }),
+  // Solo admin. Un PUT es REEMPLAZO TOTAL del juego de cajas, no un toggle:
+  // quitar una caja es quitarla de verdad, no "quedó a medio quitar".
+  assignments: (userId: string): Promise<AssignedCaja[]> =>
+    apiFetch(`/shift/assignments/${userId}`),
+  setAssignments: (userId: string, locationIds: string[]): Promise<AssignedCaja[]> =>
+    apiFetch(`/shift/assignments/${userId}`, { method: 'PUT', body: { locationIds } }),
 };
 
 // ─── Transferencias ─────────────────────────────────────────────────────────
@@ -207,4 +268,27 @@ export const AuditAPI = {
     const qs = new URLSearchParams(params).toString();
     return apiFetch(`/audit${qs ? `?${qs}` : ''}`);
   },
+};
+
+// ─── Entradas y salidas de dinero de la caja ─────────────────────────────────
+// Contrato verificado contra src/routes/cashMovements.ts:
+//  - GET  /cash-movements?locationId=&pendientes=1 → ARRAY PLANO (no {data:[…]} de
+//    lista, y SÍ envuelto: apiFetch lo desenvuelve igual).
+//  - POST /cash-movements  → 201 con la fila. 400 si la cantidad no es > 0 o
+//    > 1e9, o si una `salida` viene sin motivo. 403 si el cajero registra una
+//    salida sin turno abierto ("Abre tu turno antes de registrar una salida de
+//    dinero.").
+//  - POST /cash-movements/:id/decide → 409 si ya se decidió, 403 si quien
+//    aprueba es quien lo registró.
+export const CashMovementsAPI = {
+  list: (params: { locationId?: string; pendientes?: '1' } = {}): Promise<CashMovement[]> => {
+    const qs = new URLSearchParams(
+      Object.entries(params).filter(([, v]) => !!v) as [string, string][],
+    ).toString();
+    return apiFetch(`/cash-movements${qs ? `?${qs}` : ''}`);
+  },
+  create: (body: { locationId: string; type: 'entrada' | 'salida'; amount: number; currency: string; reason?: string }): Promise<CashMovement> =>
+    apiFetch('/cash-movements', { method: 'POST', body: body as unknown as Record<string, unknown> }),
+  decide: (id: string, decision: 'aprobar' | 'rechazar', note?: string): Promise<{ id: string; status: string }> =>
+    apiFetch(`/cash-movements/${id}/decide`, { method: 'POST', body: { decision, note: note || undefined } }),
 };

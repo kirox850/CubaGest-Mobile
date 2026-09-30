@@ -2,12 +2,12 @@
 // Mismas métricas que la web: inputs padding 9/12 radius 12 fontSize 14,
 // botones padding 9/18 radius 12, Field con label uppercase 12/600,
 // modal radius 16 con header 20/24 y título 17/700, StatCard 22/24 radius 16.
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
-  View, Text, TextInput, StyleSheet, ActivityIndicator,
+  View, Text, TextInput, StyleSheet, ActivityIndicator, AccessibilityInfo, Easing, Animated,
   TouchableOpacity, Modal, Pressable, ScrollView,
 } from 'react-native';
-import Icon from './Icon';
+import Icon, { type IconName } from './Icon';
 import { colors, radius, shadow, NAVY, themeRef } from '../config/theme';
 
 // ─── INPUT (equiv. `inp` de la web: padding 9px 12px, radius 12, fontSize 14) ─
@@ -35,6 +35,33 @@ export const Inp = (props: React.ComponentProps<typeof TextInput>) => (
 // (216pt) — se ve mal y el texto se desborda. Este dropdown abre un MENÚ de
 // opciones (lista con check en la seleccionada), igual que los menús de
 // selección de la web, y funciona idéntico en iOS y Android.
+// ─── SELECT (el desplegable de la app) ───────────────────────────────────────
+//
+// ANTES ERA UN `<Modal>`, y eso fue lo que rompió cuatro pantallas.
+//
+// Un `Modal` en react-native no es una caja dentro de la pantalla: es una
+// VENTANA DEL SISTEMA. Android da a cada una su propia "tarea" en el botón
+// atrás, y el botón atrás no se propaga al modal de abajo, sino que cierra el
+// de arriba. El resultado, en Contabilidad, Facturación y Usuarios, era esto:
+//
+//   1. Se abre un formulario.
+//   2. Se abre un `Sel` dentro.
+//   3. Se elige la opción. Se cierra el `Sel`… y con él, el formulario.
+//
+// Y en iOS la lista del desplegable se cuenta como una tercera ventana, así que
+// el "¿salir sin guardar?" se dispara con un paso de más. Estos son bugs que
+// no se ven en un emulador y sí en un teléfono.
+//
+// La solución no es cuidar el orden de cierre: es no usar una ventana del
+// sistema para algo que no es una ventana. El desplegable se dibuja CON
+// `absolute` dentro del árbol normal, así que hereda el ciclo de vida de la
+// pantalla que lo contiene y el botón atrás lo cierra en el orden correcto.
+//
+// La capa de sombra es un `Pressable` a pantalla completa: sin ella, al pulsar
+// fuera no se cerraría, y con `position:'absolute'` se lleva los toques del
+// resto de la pantalla mientras está abierto. El zIndex alto es para que quede
+// por encima de las tarjetas, que en varias pantallas ya tienen `overflow`
+// propio.
 export const Sel = ({ items, value, onValueChange, style, placeholder }: {
   items: { label: string; value: string }[];
   value: string;
@@ -44,11 +71,14 @@ export const Sel = ({ items, value, onValueChange, style, placeholder }: {
 }) => {
   const [open, setOpen] = useState(false);
   const current = items.find((i) => i.value === value);
+
   return (
     <View style={style}>
       <TouchableOpacity
         onPress={() => setOpen(true)}
         activeOpacity={0.7}
+        accessibilityRole="combobox"
+        accessibilityState={{ expanded: open }}
         style={{
           flexDirection: 'row', alignItems: 'center', gap: 6,
           paddingVertical: 9, paddingHorizontal: 12,
@@ -62,17 +92,26 @@ export const Sel = ({ items, value, onValueChange, style, placeholder }: {
         <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: -2 }}>▼</Text>
       </TouchableOpacity>
 
-      <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
-        <Pressable
-          style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', padding: 32, justifyContent: 'center', alignItems: 'center' }}
-          onPress={() => setOpen(false)}
+      {open && (
+        <View
+          style={[
+            // `absoluteFillObject` no existe en los tipos de esta versión de RN,
+            // y el componente tiene que poder hacer `position: fixed` sin
+            // depender de una hoja de estilos global que aquí no hay.
+            { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
+            { zIndex: 90, justifyContent: 'center', padding: 32 },
+          ]}
         >
           <Pressable
-            onPress={() => {}}
+            style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.45)' }}
+            accessibilityLabel="Cerrar la lista"
+            onPress={() => setOpen(false)}
+          />
+          <View
             style={{
               backgroundColor: colors.bgCard, borderRadius: 14, borderWidth: 1, borderColor: colors.border,
               maxHeight: '70%', width: '100%', maxWidth: 340, overflow: 'hidden',
-              shadowColor: '#0F172A', shadowOpacity: 0.25, shadowRadius: 24, shadowOffset: { width: 0, height: 8 }, elevation: 12,
+              ...shadow.md,
             }}
           >
             <ScrollView bounces={false}>
@@ -90,7 +129,7 @@ export const Sel = ({ items, value, onValueChange, style, placeholder }: {
                       backgroundColor: on ? colors.primaryTint : 'transparent',
                     }}
                   >
-                    <Text style={{ flex: 1, fontSize: 14.5, color: on ? colors.primary : colors.text, fontWeight: on ? '700' : '400' }}>
+                    <Text style={{ flex: 1, fontSize: 15, color: on ? colors.primary : colors.text, fontWeight: on ? '700' : '400' }}>
                       {it.label}
                     </Text>
                     {on && <Icon name="check" size={15} color={colors.primary} />}
@@ -98,9 +137,9 @@ export const Sel = ({ items, value, onValueChange, style, placeholder }: {
                 );
               })}
             </ScrollView>
-          </Pressable>
-        </Pressable>
-      </Modal>
+          </View>
+        </View>
+      )}
     </View>
   );
 };
@@ -111,7 +150,7 @@ export const Btn = ({ label, onPress, variant = 'primary', icon, style, disabled
   label?: string;
   onPress: () => void;
   variant?: BtnVariant;
-  icon?: string;
+  icon?: IconName;
   style?: object;
   disabled?: boolean;
   children?: React.ReactNode;
@@ -120,7 +159,8 @@ export const Btn = ({ label, onPress, variant = 'primary', icon, style, disabled
     primary:   { bg: colors.primary, fg: '#ffffff', bd: 'transparent' },
     secondary: { bg: colors.inputBg, fg: colors.text, bd: colors.inputBorder },
     ghost:     { bg: 'transparent', fg: colors.primary, bd: 'transparent' },
-    danger:    { bg: 'rgba(220,38,38,0.10)', fg: '#DC2626', bd: 'rgba(220,38,38,0.35)' },
+    // Lee del tema, como los otros cuatro. Ver el comentario sobre la web.
+    danger:    { bg: colors.dangerBg, fg: colors.danger, bd: colors.dangerLight },
     success:   { bg: colors.success, fg: '#ffffff', bd: 'transparent' },
   }[variant];
   return (
@@ -155,11 +195,33 @@ export const Field = ({ label, required, children }: {
 );
 
 // ─── BADGE (idéntico a la web: padding 2/10, radius 20, 12px w600, bg +20) ───
-export const Badge = ({ label, color, bg }: { label: string; color?: string; bg?: string }) => {
+/**
+ * ¿Se puede derivar un fondo translúcido a partir de este color?
+ *
+ * Solo con un hex de 6 dígitos: `#DC2626` + '20' = `#DC262620`, que es un hex
+ * de 8 con alfa. Con un `rgba(220,38,38,0.14)` —el token del tema oscuro— el
+ * mismo truco daría `rgba(...)20`, que no es un color y React Native descarta en
+ * silencio. Por eso, si el color no es un hex de 6, el fondo tiene que venir
+ * explícito: es mejor un badge sin tinte que un badge con fondo invisible.
+ */
+const esHexDe6 = (c: string) => /^#[0-9a-fA-F]{6}$/.test(c);
+
+// `label` es ReactNode, igual que en la web (primitives.tsx:78). Con `string`
+// no había forma de poner un icono dentro de un badge sin inventarse un
+// `<Text>` con un emoji dentro, que es justo lo que la fase U1 quita.
+export const Badge = ({ label, color, bg, icon }: {
+  label: React.ReactNode; color?: string; bg?: string; icon?: IconName;
+}) => {
   const c = color || colors.primary;
+  // Se evalúa en render, no al montar: `colors` cambia con el tema y un fondo
+  // calculado una vez se quedaría con el tinte del tema anterior.
+  const fondo = bg ?? (esHexDe6(c) ? c + '20' : 'transparent');
   return (
-    <View style={{ paddingHorizontal: 10, paddingVertical: 2, borderRadius: 20, backgroundColor: bg || c + '20', alignSelf: 'flex-start' }}>
-      <Text style={{ fontSize: 12, fontWeight: '600', color: c, letterSpacing: 0.3 }}>{label}</Text>
+    <View style={{ paddingHorizontal: 10, paddingVertical: 2, borderRadius: 20, backgroundColor: fondo, alignSelf: 'flex-start' }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+        {icon ? <Icon name={icon} size={12} color={c} /> : null}
+        <Text style={{ fontSize: 12, fontWeight: '600', color: c, letterSpacing: 0.3 }}>{label}</Text>
+      </View>
     </View>
   );
 };
@@ -184,15 +246,37 @@ export const AppModal = ({ title, onClose, children, width = 560 }: {
 );
 
 // ─── TOAST (idéntico a la web: fondo sólido, radius 12, 12/20) ────────────────
-let __toastClose: (() => void) | null = null;
-export const showToastGlobal: ((msg: string, type?: string) => void) | null = null;
+//
+// El `showToastGlobal` era un `null` permanente: la variable existía, se
+// importaba en ninguna parte y `Toast` no se montaba en ningún sitio. Es decir,
+// el "éxito" de la app se anunciaba con un Alert cuyo título era un check, que es un
+// diálogo modal del sistema para informar de algo que ya pasó y que se ha
+// resuelto solo. El usuario tiene que tocar "OK" para volver al POS.
+//
+// Ahora hay un handle real. La clave de la sustitución de estado es lo que
+// reinicia el temporizador: dos toasts seguidos en 3 s no comparten el primero
+// de 3.2 s, que es el error clásico de un `setTimeout` en un `useEffect` con
+// `[]` de dependencias.
+let setToastGlobal: ((t: { msg: string; type: string; key: number } | null) => void) | null = null;
+
+export function showToast(msg: string, type: 'success' | 'error' | 'info' | 'warning' = 'info'): void {
+  setToastGlobal?.({ msg, type, key: Date.now() });
+}
 
 export const Toast = ({ msg, type, onClose }: { msg: string; type: string; onClose: () => void }) => {
   useEffect(() => {
     const t = setTimeout(onClose, 3200);
     return () => clearTimeout(t);
-  }, []);
-  const palette: Record<string, string> = { success: '#10B981', error: '#DC2626', info: colors.primary, warning: '#C2410C' };
+  }, [onClose]);
+  // Lee del tema: la paleta del Toast estaba en hex del modo claro, igual que
+  // el `danger` de `Btn`, y por eso en oscuro un toast de error salía rojo
+  // apagado sobre fondo oscuro.
+  const palette: Record<string, string> = {
+    success: colors.success,
+    error: colors.danger,
+    info: colors.primary,
+    warning: colors.warning,
+  };
   return (
     <View style={{ position: 'absolute', bottom: 88, left: 24, right: 24, zIndex: 9999, backgroundColor: palette[type] || palette.info, paddingVertical: 12, paddingHorizontal: 20, borderRadius: 12, flexDirection: 'row', alignItems: 'center', gap: 10, ...shadow.md }}>
       <Text style={{ color: '#ffffff', fontSize: 14, fontWeight: '500', flex: 1 }}>{msg}</Text>
@@ -203,19 +287,32 @@ export const Toast = ({ msg, type, onClose }: { msg: string; type: string; onClo
   );
 };
 
+/** Se monta UNA vez, junto al DialogHost. */
+export function ToastHost() {
+  const [toast, setToast] = useState<{ msg: string; type: string; key: number } | null>(null);
+  useEffect(() => {
+    setToastGlobal = setToast;
+    return () => { setToastGlobal = null; };
+  }, []);
+  if (!toast) return null;
+  // `key` fuerza el remount y con él el reinicio del temporizador de 3.2 s.
+  return <Toast key={toast.key} msg={toast.msg} type={toast.type} onClose={() => setToast(null)} />;
+}
+
+
 // ─── OFFLINE BANNER (port 1:1 de la web: franja fina bajo el header) ─────────
 export const OfflineBanner = ({ online, syncing, pending, conflicts }: {
   online: boolean; syncing: boolean; pending: number; conflicts: number;
 }) => {
   if (online && !syncing && pending === 0 && conflicts === 0) return null;
-  const bg = !online ? '#8B1A1A' : syncing ? '#1A5C8B' : conflicts > 0 ? '#c17a00' : '#1A7A3C';
+  const bg = !online ? colors.syncError : syncing ? colors.syncBusy : conflicts > 0 ? colors.syncWarn : colors.syncOk;
   const msg = !online
     ? `Sin conexión — modo offline${pending > 0 ? ` · ${pending} ventas en cola` : ''}`
     : syncing
       ? 'Sincronizando ventas...'
       : conflicts > 0
         ? `${conflicts} venta(s) con conflicto — revisa en Facturas`
-        : `✓ ${pending === 0 ? 'Todo sincronizado' : `${pending} pendientes`}`;
+        : `${pending === 0 ? 'Todo sincronizado' : `${pending} pendientes`}`;
   return (
     <View style={{ backgroundColor: bg, paddingVertical: 8, paddingHorizontal: 16 }}>
       <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600', textAlign: 'center' }}>{msg}</Text>
@@ -225,7 +322,7 @@ export const OfflineBanner = ({ online, syncing, pending, conflicts }: {
 
 // ─── STATCARD (idéntico a la web del dashboard: 22/24, radius 16, caja 42) ───
 export const StatCard = ({ label, value, sub, color, icon }: {
-  label: string; value: string; sub?: string; color?: string; icon?: string;
+  label: string; value: string; sub?: string; color?: string; icon?: IconName;
 }) => {
   const c = color || colors.primary;
   return (
@@ -259,7 +356,12 @@ export const PageHeader = ({ title, subtitle, error }: { title: string; subtitle
   <View style={{ gap: 4 }}>
     <Text style={{ fontSize: 22, fontWeight: '800', color: colors.text }}>{title}</Text>
     {subtitle ? <Text style={{ fontSize: 14, color: colors.textMuted }}>{subtitle}</Text> : null}
-    {error ? <Text style={{ fontSize: 12, color: '#F97316' }}>⚡ {error}</Text> : null}
+    {error ? (
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+          <Icon name="zap" size={12} color={colors.warning} />
+          <Text style={{ fontSize: 12, color: colors.warning }}>{error}</Text>
+        </View>
+      ) : null}
   </View>
 );
 
@@ -268,14 +370,17 @@ export const ErrorBanner = ({ message }: { message: string }) => {
   if (!message) return null;
   return (
     <View style={{ backgroundColor: colors.dangerBg, borderLeftWidth: 3, borderLeftColor: colors.danger, padding: 12, marginHorizontal: 16, marginBottom: 8, borderRadius: 12 }}>
-      <Text style={{ color: colors.danger, fontSize: 13, fontWeight: '600' }}>⚠ {message}</Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+        <Icon name="alert" size={14} color={colors.danger} />
+        <Text style={{ color: colors.danger, fontSize: 13, fontWeight: '600' }}>{message}</Text>
+      </View>
     </View>
   );
 };
 
-export const EmptyState = ({ text, icon }: { text: string; icon?: string }) => (
+export const EmptyState = ({ text, icon }: { text: string; icon?: IconName }) => (
   <View style={{ alignItems: 'center', padding: 40, gap: 12 }}>
-    {icon ? <Icon name={icon} size={40} color={colors.textMuted} /> : <Text style={{ fontSize: 40 }}>📭</Text>}
+    <Icon name={icon || 'doc'} size={40} color={colors.textMuted} />
     <Text style={{ fontSize: 14, color: colors.textMuted, textAlign: 'center' }}>{text}</Text>
   </View>
 );
@@ -286,15 +391,83 @@ export const Spinner = ({ size = 'large' }: { size?: 'large' | 'small' }) => (
   </View>
 );
 
-export const Card = ({ children, style }: { children: React.ReactNode; style?: object }) => (
-  <View style={[{ backgroundColor: colors.bgCard, borderRadius: 16, borderWidth: 1, borderColor: colors.border, padding: 16 }, shadow.sm, style]}>
-    {children}
-  </View>
-);
-
 export const SectionHeader = ({ title, subtitle }: { title: string; subtitle?: string }) => (
   <View style={{ paddingHorizontal: 16, paddingVertical: 12 }}>
     <Text style={{ fontSize: 22, fontWeight: '800', color: colors.text, letterSpacing: -0.5 }}>{title}</Text>
     {subtitle ? <Text style={{ fontSize: 13, color: colors.textMuted, marginTop: 2 }}>{subtitle}</Text> : null}
+  </View>
+);
+
+// ─── Skeletons ───────────────────────────────────────────────────────────────
+// El plan los pedía para el POS y las pantallas de carga lenta, y la razón es
+// concreta: una pantalla en blanco durante dos segundos no parece una pantalla
+// cargando, parece rota. En un móvil con datos móviles eso pasa en cada carga,
+// y en el POS es donde más molesta, porque es la que se usa con una cola
+// delante.
+//
+// La diferencia con `Spinner` es que el spinner se CENTRA y ocupa la pantalla
+// entera: mueve el foco a una sola cosa. El esqueleto conserva la FORMA de lo
+// que va a aparecer, así que cuando llega el dato nada se recoloca y la pantalla
+// no "salta". Es la diferencia entre esperar y quedarse mirando.
+//
+// La shimmer es un degradado que se desplaza con `useNativeDriver`, de modo que
+// corre en el hilo de la UI y no compite con el de la red. Y si el sistema pide
+// menos animación, no se anima: en `AccessibilityInfo.isReduceMotionEnabled`
+// el bloque se queda estático.
+
+export const Skeleton = ({ w, h = 14, r = 8, style }: {
+  w?: number | `${number}%`; h?: number; r?: number; style?: any;
+}) => {
+  const v = useRef(new Animated.Value(0)).current;
+  const [mover, setMover] = useState(true);
+
+  useEffect(() => {
+    let vivo = true;
+    AccessibilityInfo.isReduceMotionEnabled().then((r) => { if (vivo) setMover(!r); });
+    return () => { vivo = false; };
+  }, []);
+
+  useEffect(() => {
+    if (!mover) return;
+    const loop = Animated.loop(
+      Animated.timing(v, { toValue: 1, duration: 1100, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [mover, v]);
+
+  const op = v.interpolate({ inputRange: [0, 0.5, 1], outputRange: [0.45, 0.85, 0.45] });
+
+  return (
+    <Animated.View
+      accessibilityRole="progressbar"
+      accessibilityLabel="Cargando"
+      style={[
+        { width: w, height: h, borderRadius: r, backgroundColor: colors.inputBg, opacity: mover ? op : 0.6 },
+        style,
+      ]}
+    />
+  );
+};
+
+/** Varias líneas de esqueleto, la última más corta: es lo que espera el ojo. */
+export const SkeletonText = ({ lines = 3, w }: { lines?: number; w?: number | `${number}%` }) => (
+  <View style={{ gap: 8 }}>
+    {Array.from({ length: lines }).map((_, i) => (
+      <Skeleton key={i} w={i === lines - 1 ? '60%' : w} h={12} />
+    ))}
+  </View>
+);
+
+/** Las filas de una tabla/lista: la forma que se repite en la app. */
+export const SkeletonRows = ({ n = 5, h = 62 }: { n?: number; h?: number }) => (
+  <View style={{ gap: 8, padding: 16 }}>
+    {Array.from({ length: n }).map((_, i) => (
+      <View key={i} style={[{ borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 12, gap: 9 }, i === n - 1 && { opacity: 0.5 }]}>
+        <Skeleton w={`${55 + (i * 7) % 30}%`} h={13} />
+        <Skeleton w="35%" h={11} />
+        {h > 60 && <Skeleton w="22%" h={11} />}
+      </View>
+    ))}
   </View>
 );

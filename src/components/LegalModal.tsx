@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet, Modal, ScrollView, TouchableOpacity } from 'react-native';
-import { colors, radius, spacing, themeRef } from '../config/theme';
+import { colors, radius, space, themeRef } from '../config/theme';
+import Icon from '../components/Icon';
 
 // Parser de markdown ligero (#, ##, **negrita**, - listas)
 function renderLegalMarkdown(md: string): React.ReactNode[] {
@@ -72,7 +73,7 @@ export default function LegalModal({ visible, title, content, onClose }: LegalMo
           <View style={styles.header}>
             <Text style={styles.title}>{title}</Text>
             <TouchableOpacity onPress={onClose} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-              <Text style={styles.closeIcon}>✕</Text>
+              <Icon name="close" size={17} color={colors.textMuted} />
             </TouchableOpacity>
           </View>
           <ScrollView style={styles.body} contentContainerStyle={{ paddingBottom: 8 }}>
@@ -91,7 +92,7 @@ export default function LegalModal({ visible, title, content, onClose }: LegalMo
 
 const createStyles = () => StyleSheet.create({
   overlay: { flex: 1, backgroundColor: 'rgba(15,23,42,0.45)', alignItems: 'center', justifyContent: 'center', padding: 16 },
-  card: { backgroundColor: colors.bgCard, borderRadius: radius.lg, width: '100%', maxHeight: '85%', overflow: 'hidden' },
+  card: { backgroundColor: colors.bgCard, borderRadius: radius.xl, width: '100%', maxHeight: '85%', overflow: 'hidden' },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: colors.border },
   title: { fontSize: 16, fontWeight: '800', color: colors.text },
   closeIcon: { fontSize: 18, color: colors.textMuted },
@@ -99,12 +100,12 @@ const createStyles = () => StyleSheet.create({
   footer: { paddingHorizontal: 20, paddingVertical: 12, borderTopWidth: 1, borderTopColor: colors.border },
   closeBtn: { backgroundColor: colors.primary, borderRadius: radius.md, paddingVertical: 12, alignItems: 'center' },
   closeBtnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
-  h1: { fontSize: 18, fontWeight: '800', color: colors.text, marginTop: spacing.md, marginBottom: spacing.sm },
-  h2: { fontSize: 15, fontWeight: '800', color: colors.text, marginTop: spacing.md, marginBottom: spacing.xs },
-  h3: { fontSize: 13, fontWeight: '700', color: colors.textSecondary, marginTop: spacing.sm, marginBottom: spacing.xs },
-  p: { fontSize: 13, lineHeight: 19, color: colors.textSecondary, marginBottom: spacing.sm },
+  h1: { fontSize: 18, fontWeight: '800', color: colors.text, marginTop: space.md, marginBottom: space.sm },
+  h2: { fontSize: 15, fontWeight: '800', color: colors.text, marginTop: space.md, marginBottom: space.xs },
+  h3: { fontSize: 13, fontWeight: '700', color: colors.textSecondary, marginTop: space.sm, marginBottom: space.xs },
+  p: { fontSize: 13, lineHeight: 19, color: colors.textSecondary, marginBottom: space.sm },
   bold: { fontWeight: '700', color: colors.text },
-  list: { marginBottom: spacing.sm },
+  list: { marginBottom: space.sm },
   listItem: { flexDirection: 'row', marginBottom: 4, paddingLeft: 4 },
   listBullet: { color: colors.textMuted, marginRight: 6, fontSize: 13 },
   listText: { flex: 1, fontSize: 13, lineHeight: 19, color: colors.textSecondary },

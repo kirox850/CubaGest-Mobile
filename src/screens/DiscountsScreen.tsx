@@ -1,13 +1,12 @@
 import React, { useCallback, useState } from 'react';
-import {
-  View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView,
-  ActivityIndicator, Alert, RefreshControl,
-} from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { DiscountsAPI, LocationsAPI } from '../api/endpoints';
 import { colors, radius, shadow, themeRef } from '../config/theme';
-import { Badge, EmptyState, ErrorBanner, SectionHeader, PageHeader } from '../components/UI';
+import { Badge, EmptyState, ErrorBanner, SectionHeader, PageHeader, SkeletonRows } from '../components/UI';
+import { showConfirm } from '../components/dialogs';
+import Icon from '../components/Icon';
 
 // ─── DESCUENTOS (admin) — paridad con DiscountsAdmin de la web ───────────────
 // MISMO payload que la web: los enums del backend son EXACTOS
@@ -20,7 +19,7 @@ const emptyForm = {
   maxUses: '', locationScope: 'todas', locationIds: [] as string[], active: true,
 };
 
-export default function DiscountsScreen() {
+export default function DiscountsScreen({ embedded = false }: { embedded?: boolean }) {
   const [list, setList] = useState<any[]>([]);
   const [locs, setLocs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -65,16 +64,10 @@ export default function DiscountsScreen() {
     } finally { setSaving(false); }
   };
 
-  const remove = (d: any) => {
-    Alert.alert('Eliminar descuento', `¿Eliminar "${d.name}"?`, [
-      { text: 'Cancelar', style: 'cancel' },
-      {
-        text: 'Eliminar', style: 'destructive', onPress: async () => {
-          try { await DiscountsAPI.remove(d.id); load(); }
-          catch (e) { setError((e as Error).message); }
-        },
-      },
-    ]);
+  const remove = async (d: any) => {
+    if (!(await showConfirm(`¿Eliminar "${d.name}"?`))) return;
+    try { await DiscountsAPI.remove(d.id); load(); }
+    catch (e) { setError((e as Error).message); };
   };
 
   const toggleActive = async (d: any) => {
@@ -103,10 +96,12 @@ export default function DiscountsScreen() {
       >
         <ErrorBanner message={error} />
 
-        <PageHeader
-          title="Descuentos"
-          subtitle="Solo el administrador puede crearlos o eliminarlos. Los de tipo Venta se aplican al total en el POS."
-        />
+        {!embedded && (
+          <PageHeader
+            title="Descuentos"
+            subtitle="Solo el administrador puede crearlos o eliminarlos. Los de tipo Venta se aplican al total en el POS."
+          />
+        )}
 
         {/* ── Formulario de creación ── */}
         <View style={styles.formCard}>
@@ -161,7 +156,7 @@ export default function DiscountsScreen() {
                 const on = form.locationIds.includes(l.id);
                 return (
                   <TouchableOpacity key={l.id} style={[styles.locChip, on && styles.locChipOn]} onPress={() => toggleLoc(l.id)}>
-                    <Text style={[styles.locText, on && styles.locTextOn]}>{on ? '✓ ' : ''}{l.name}</Text>
+                    <Text style={[styles.locText, on && styles.locTextOn]}>{on ? '' : ''}{l.name}</Text>
                   </TouchableOpacity>
                 );
               })}
@@ -175,7 +170,17 @@ export default function DiscountsScreen() {
 
         {/* ── Lista existente ── */}
         <SectionHeader title={`Activos (${list.length})`} />
-        {list.length === 0 && !loading && <EmptyState text="Aún no hay descuentos creados" icon="🏷️" />}
+        {list.length === 0 && !loading && <EmptyState text="Aún no hay descuentos creados" icon="gift" />}
+        {/* Mientras no haya nada que mostrar se dibujan filas de esqueleto en
+            lugar del hueco vacío: el formulario de arriba ya está en su sitio y
+            la lista es lo único que crece. Solo en la PRIMERA carga, porque
+            `loading` también lo pone el pull-to-refresh y ahí la lista ya
+            existe y no debe parpadear. */}
+        {loading && list.length === 0 && (
+          <View style={{ marginHorizontal: -4 }}>
+            <SkeletonRows n={3} />
+          </View>
+        )}
         {list.map((d: any) => (
           <View key={d.id} style={[styles.item, shadow.sm]}>
             <View style={{ flex: 1 }}>
@@ -195,7 +200,7 @@ export default function DiscountsScreen() {
               <Text style={[styles.itemBtnText, { color: d.active ? colors.success : colors.textMuted }]}>{d.active ? 'Activo' : 'Pausado'}</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.itemDel} onPress={() => remove(d)}>
-              <Text style={styles.itemDelText}>🗑</Text>
+              <Icon name="trash" size={14} color={colors.danger} />
             </TouchableOpacity>
           </View>
         ))}
@@ -211,7 +216,7 @@ const createStyles = () => StyleSheet.create({
 
   formCard: {
     backgroundColor: colors.bgCard, borderWidth: 1, borderColor: colors.border,
-    borderRadius: radius.lg, padding: 14, marginBottom: 16,
+    borderRadius: radius.xl, padding: 14, marginBottom: 16,
   },
   label: { fontSize: 12, fontWeight: '700', color: colors.textMuted, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6, marginTop: 12 },
   input: {
@@ -227,12 +232,12 @@ const createStyles = () => StyleSheet.create({
     paddingVertical: 9, paddingHorizontal: 6, alignItems: 'center', backgroundColor: colors.bg,
   },
   segBtnOn: { borderColor: colors.primary, backgroundColor: colors.primaryTint },
-  segText: { fontSize: 12.5, fontWeight: '600', color: colors.textSecondary, textAlign: 'center' },
+  segText: { fontSize: 12, fontWeight: '600', color: colors.textSecondary, textAlign: 'center' },
   segTextOn: { color: colors.primary, fontWeight: '800' },
 
   locWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 6 },
   locChip: {
-    borderWidth: 1.5, borderColor: colors.border, borderRadius: radius.full,
+    borderWidth: 1.5, borderColor: colors.border, borderRadius: radius.pill,
     paddingHorizontal: 12, paddingVertical: 7, backgroundColor: colors.bg,
   },
   locChipOn: { borderColor: colors.primary, backgroundColor: colors.primaryTint },
@@ -251,11 +256,11 @@ const createStyles = () => StyleSheet.create({
     backgroundColor: colors.bgCard, borderWidth: 1, borderColor: colors.border,
     borderRadius: radius.md, padding: 12, marginBottom: 8,
   },
-  itemName: { fontSize: 14.5, fontWeight: '700', color: colors.text },
+  itemName: { fontSize: 15, fontWeight: '700', color: colors.text },
   itemMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 5, flexWrap: 'wrap' },
-  itemMeta: { fontSize: 11.5, color: colors.textMuted, flex: 1 },
+  itemMeta: { fontSize: 12, color: colors.textMuted, flex: 1 },
   itemBtn: {
-    borderWidth: 1.5, borderRadius: radius.full, paddingHorizontal: 10, paddingVertical: 5,
+    borderWidth: 1.5, borderRadius: radius.pill, paddingHorizontal: 10, paddingVertical: 5,
   },
   itemBtnOn: { borderColor: colors.success, backgroundColor: colors.successBg },
   itemBtnOff: { borderColor: colors.border, backgroundColor: colors.bgSecondary },

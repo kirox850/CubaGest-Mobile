@@ -1,22 +1,23 @@
 import React, { useCallback, useState } from 'react';
-import {
-  View, Text, StyleSheet, FlatList, TextInput,
-  TouchableOpacity, Alert, ScrollView,
-} from 'react-native';
+import { View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, ScrollView } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { LocationsAPI, SalesAPI, SettingsAPI, DiscountsAPI } from '../api/endpoints';
+import { useShift } from '../hooks/useShift';
+import { useLocations } from '../hooks/useLocations';
+import { resolveOwn, debePedirTurno } from '../config/locationResolution';
+import ShiftSheet, { ShiftBadge } from '../components/ShiftSheet';
 import { useAuth } from '../context/AuthContext';
 import { useSync } from '../context/SyncContext';
 import { colors, themeRef } from '../config/theme';
 import { PAY_METHODS, CURRENCY_SYMBOLS } from '../config/roles';
-import { EmptyState, ErrorBanner, Sel, Inp, Field } from '../components/UI';
+import { EmptyState, ErrorBanner, Sel, Inp, Field, Skeleton, showToast } from '../components/UI';
+import { showConfirm, showError } from '../components/dialogs';
 import Icon from '../components/Icon';
 import {
   cacheProducts, getOfflineProducts, saveSaleOffline,
 } from '../offline/offlineStore';
 import { activateNamespace, getActiveNamespace, UNKNOWN_LOCATION } from '../offline/namespace';
 import { generateUuid } from '../utils/uuid';
-import type { Location } from '../types';
 
 const fmt = (n: number) => Number(n || 0).toFixed(2);
 
@@ -41,10 +42,24 @@ export default function POSScreen() {
   const { refresh: refreshSync, pendingCount } = useSync();
   // Aviso único: se venderó sin conexión sin ubicación conocida en el teléfono.
   const warnedUnknownLocation = React.useRef(false);
+
+  // ── TURNO ────────────────────────────────────────────────────────────────
+  // La caja de trabajo sale de aquí. Sin esto el POS tenía que adivinarla, y
+  // con cajas compartidas adivina siempre en algún sitio que no es el suyo.
+  const {
+    shift, cajas, cargando: cargandoTurno, offline: turnoSinRed,
+    aviso: avisoTurno, abrirTurno, cerrarTurno, refresh: refreshTurno,
+  } = useShift(user?.id);
+
+  // Las ubicaciones, cacheadas de cuenta: sin esta copia el modo sin conexión
+  // no sabe a qué caja pertenece el catálogo y el POS entero se ve roto.
+  const { locations, cargando: cargandoLocs, sinCache, refresh: refreshLocs } =
+    useLocations(user, { shiftLocationId: shift?.locationId ?? null });
+
   const [products, setProducts] = useState<PosProduct[]>([]);
   const [myLocationId, setMyLocationId] = useState('');
   const [myLocationName, setMyLocationName] = useState('');
-  const [locations, setLocations] = useState<Location[]>([]);
+  const [pidiendoTurno, setPidiendoTurno] = useState(false);
   const [search, setSearch] = useState('');
   const [cart, setCart] = useState<Record<string, number>>({});
   const [payMethod, setPayMethod] = useState('efectivo');
@@ -53,6 +68,7 @@ export default function POSScreen() {
   const [clientPhone, setClientPhone] = useState('');
   const [cashGiven, setCashGiven] = useState('');
   const [error, setError] = useState('');
+  const [cargandoCatalogo, setCargandoCatalogo] = useState(true);
   const [saving, setSaving] = useState(false);
   // Multimoneda + descuentos
   const [saleCurrency, setSaleCurrency] = useState('CUP');
@@ -64,9 +80,40 @@ export default function POSScreen() {
   const [lineDiscounts, setLineDiscounts] = useState<Record<string, string>>({});
 
   const needsTransfer = payMethod === 'transferencia';
-  // El admin no tiene ubicación propia: el backend exige que indique en cuál
-  // vende (locationId explícito), así que la app le deja elegirla.
-  const needsLocationPicker = user?.role === 'admin';
+  // El admin no tiene turno propio por defecto: el backend exige que indique en
+  // cuál vende. Pero en cuanto ABRE turno, la caja la dicta el turno y se
+  // ofrece el selector solo cuando no hay ninguno — si no, el admin cambiaría
+  // de caja con el turno abierto y las ventas se irían a la caja que él eligió
+  // mientras el cierre cuenta la del turno.
+  const needsLocationPicker = user?.role === 'admin' && !shift;
+
+  // Con UN solo juego de cajas asignadas no hay nada que decidir.
+  const unicaAsignada = cajas.length === 1 ? cajas[0].id : undefined;
+
+  // La caja en la que se vende. La decide `resolveOwn`, que es la MISMA regla
+  // que aplica el servidor; la lista de esta pantalla no vuelve a decidirlo.
+  React.useEffect(() => {
+    if (!locations.length) return;
+    const own = resolveOwn({
+      locations,
+      shift,
+      role: user?.role || '',
+      unicaAsignada,
+      recordada: myLocationId,
+    });
+    if (own && own.id !== myLocationId) {
+      setMyLocationId(own.id);
+      setMyLocationName(own.name);
+    }
+  }, [locations, shift, user?.role, unicaAsignada]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Un cajero con varias cajas y sin turno no puede vender: hay que preguntarle
+  // cuál. Con una sola no se pregunta nada.
+  React.useEffect(() => {
+    if (debePedirTurno({ role: user?.role || '', cargando: cargandoTurno, shift, aviso: avisoTurno, cajas })) {
+      setPidiendoTurno(true);
+    }
+  }, [user?.role, cargandoTurno, shift, avisoTurno, cajas]);
 
   // Config de empresa (monedas habilitadas) y descuentos disponibles
   React.useEffect(() => {
@@ -80,50 +127,34 @@ export default function POSScreen() {
   const avail = (p: PosProduct) =>
     p.isOfflineRow ? (p.localStock ?? 0) : Number(p.stock);
 
-  // ── Carga: online usa stock de MI ubicación (igual que la web); offline
-  //    cae al cache local automáticamente.
-  //    La lista de ubicaciones NO se vuelve a pedir en cada venta: se resuelve
-  //    una vez y se refresca solo el stock, que es lo único que cambia.
-  const load = useCallback(async (opts: { forceLocation?: boolean; locationId?: string } = {}) => {
+  // ── Carga ────────────────────────────────────────────────────────────────
+  // Online usa el stock de la caja en la que se está trabajando (igual que la
+  // web); sin conexión cae al catálogo cacheado de esa misma caja.
+  //
+  // RENDER Y CACHÉ VAN SEPARADOS A PROPÓSITO. Antes era
+  // `await cacheProducts(...); setProducts(items...)`: la pantalla no se
+  // repintaba hasta que el catálogo entero se escribía en el disco. En un
+  // teléfono normal son unos milisegundos; en uno viejo, con la pantalla
+  // bloqueada o con un almacenamiento lento, el POS se quedaba EN BLANCO
+  // con red y productos disponibles. La venta no puede depender de una
+  // escritura en disco que no es un requisito para cobrar.
+  const load = useCallback(async (opts: { locationId?: string } = {}) => {
     setError('');
-    if (!online) {
-      const cached = await getOfflineProducts();
-      setProducts(cached.filter((p) => p.localStock > 0).map((p) => ({ ...p, isOfflineRow: true })));
-      return;
-    }
+    setCargandoCatalogo(true);
     try {
+      if (!online) {
+        const cached = await getOfflineProducts();
+        setProducts(cached.filter((p) => p.localStock > 0).map((p) => ({ ...p, isOfflineRow: true })));
+        return;
+      }
+
       // La ubicación indicada por el llamador manda: setMyLocationId es
       // asíncrono, así que leer `myLocationId` aquí seguiría viendo el valor
       // anterior y el admin acabaría viendo el stock de la caja equivocada.
-      let locationId = opts.locationId || myLocationId;
-
-      if (!locationId || opts.forceLocation) {
-        const locs = locations.length ? locations : await LocationsAPI.list();
-        // Solo guardamos la lista la primera vez: volver a setear un array
-        // nuevo en cada carga recrearía `load` y dispararía el efecto de foco
-        // otra vez (bucle de peticiones al servidor).
-        if (!locations.length) setLocations(locs);
-        const own = opts.locationId
-          ? locs.find((l) => l.id === opts.locationId)
-          : needsLocationPicker
-            ? locs.find((l) => l.id === myLocationId)
-            : user?.role === 'almacenista'
-              ? locs.find((l) => l.type === 'almacen')
-              : locs.find((l) => l.type === 'caja' && l.ownerUserId === user?.id);
-        if (own) {
-          locationId = own.id;
-          setMyLocationId(own.id);
-          setMyLocationName(own.name);
-        }
-      }
+      const locationId = opts.locationId || myLocationId;
 
       if (!locationId) {
         setProducts([]);
-        setError(
-          needsLocationPicker
-            ? 'Elija la ubicación desde la que va a vender.'
-            : 'No tiene una ubicación asignada para vender. Contacte al administrador.',
-        );
         return;
       }
 
@@ -132,8 +163,11 @@ export default function POSScreen() {
       await activateNamespace(user, locationId);
 
       const { items } = await LocationsAPI.stock(locationId);
-      await cacheProducts(items, locationId);
       setProducts(items.filter((p: any) => p.active && p.stock > 0));
+      // El catálogo se guarda DESPUÉS de pintar, sin esperar. Si esta escritura
+      // falla, el POS sigue funcionando con los datos del servidor; solo se
+      // pierde la capacidad de vender sin conexión en esa caja.
+      void cacheProducts(items, locationId).catch(() => {});
     } catch (err) {
       // Falló la red/permisos: caemos al cache offline sin bloquear la venta.
       const cached = await getOfflineProducts();
@@ -143,8 +177,14 @@ export default function POSScreen() {
       } else {
         setError((err as Error).message);
       }
+    } finally {
+      // El flag se baja aquí y no a mano en cada rama. `load` tiene dos salidas
+      // tempranas y con un `set` en cada una, el camino que se añadiera después
+      // lo olvidaría y el POS se quedaría cargando para siempre: el mismo modo
+      // de fallo que un `SET` sin `RETURN`.
+      setCargandoCatalogo(false);
     }
-  }, [online, user, myLocationId, locations, needsLocationPicker]);
+  }, [online, user, myLocationId]);
 
   // Al abrir la pantalla sin conexión reabrimos el namespace de la última
   // ubicación conocida, para que la cola de esa caja siga visible.
@@ -153,7 +193,10 @@ export default function POSScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
 
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  // `shift?.id` está en la dependencia a propósito: al abrir el turno cambia la
+  // caja, y sin esto el POS seguiría mostrando el catálogo de la caja anterior
+  // — el mismo bug que la web ya tuvo.
+  useFocusEffect(useCallback(() => { load(); }, [load, shift?.id]));
 
   const selectLocation = (id: string) => {
     if (!id || id === myLocationId) return;
@@ -164,7 +207,36 @@ export default function POSScreen() {
     setLineDiscounts({});
     // Se pasa la ubicación explícitamente: dentro de `load` el estado todavía
     // es el anterior y buscaría el stock de la caja que acabamos de dejar.
-    load({ forceLocation: true, locationId: id });
+    load({ locationId: id });
+  };
+
+  const abrirTurnoEn = async (locationId: string, baseCash: Record<string, number>) => {
+    try {
+      await abrirTurno(locationId, baseCash);
+      setPidiendoTurno(false);
+      // El turno es lo que fija la caja; el catálogo se recarga solo porque
+      // `shift?.id` cambió.
+      await refreshLocs().catch(() => {});
+    } catch (e) {
+      // El mensaje del servidor llega tal cual: "Abre tu turno…", "No tienes
+      // esa caja asignada", "Ya tienes un turno abierto" — todos son errores
+      // que el cajero puede entender y no un genérico.
+      showError((e as Error).message);
+    }
+  };
+
+  const terminarTurno = async () => {
+    // Se avisa de lo que pasa con el carrito ANTES de cerrar. El turno es lo
+    // único de esta pantalla que no se puede volver a abrir.
+    if (!(await showConfirm('¿Terminar el turno? Se vaciará el carrito.'))) return;
+    try {
+      await cerrarTurno();
+      await refreshTurno();
+      setCart({});
+      load();
+    } catch (e) {
+      showError((e as Error).message);
+    };
   };
 
   const filtered = products.filter((p) => {
@@ -180,7 +252,7 @@ export default function POSScreen() {
   const setQty = (product: PosProduct, qty: number) => {
     if (qty < 0) return;
     if (qty > avail(product)) {
-      Alert.alert('Stock insuficiente', `Solo hay ${avail(product)} unidades disponibles`);
+      showError('Stock insuficiente: ' + `Solo hay ${avail(product)} unidades disponibles`);
       return;
     }
     setCart((prev) => {
@@ -231,13 +303,13 @@ export default function POSScreen() {
 
   const checkout = async () => {
     if (cartItems.length === 0) {
-      return Alert.alert('Carrito vacio', 'Agrega al menos un producto');
+      return showError('Carrito vacio: ' + 'Agrega al menos un producto');
     }
     if (needsTransfer && (!clientName || !clientNit || !clientPhone)) {
-      return Alert.alert('Datos requeridos', 'Para transferencia completa nombre, carnet y telefono');
+      return showError('Datos requeridos: ' + 'Para transferencia completa nombre, carnet y telefono');
     }
     if (online && needsLocationPicker && !myLocationId) {
-      return Alert.alert('Ubicación requerida', 'Elija la ubicación desde la que va a vender');
+      return showError('Ubicación requerida: ' + 'Elija la ubicación desde la que va a vender');
     }
 
     setSaving(true);
@@ -296,7 +368,7 @@ export default function POSScreen() {
         // Recargar con stock local actualizado
         const cached = await getOfflineProducts();
         setProducts(cached.filter((p) => (p.localStock ?? 0) > 0).map((p) => ({ ...p, isOfflineRow: true })));
-        Alert.alert('✓ Venta guardada offline', `Factura ${offline.localId} se sincronizará automáticamente`);
+        showToast(`Factura ${offline.localId} se sincronizará automáticamente`, 'success');
       } else {
         // ── Venta ONLINE: el backend recalcula precios/impuestos y descuenta
         //    el stock de la ubicación indicada.
@@ -309,7 +381,7 @@ export default function POSScreen() {
           await cacheProducts(items, myLocationId);
           setProducts(items.filter((p: any) => p.active && p.stock > 0));
         }
-        Alert.alert('✓ Venta registrada', `La factura ${receiptId} se genero correctamente`);
+        showToast(`La factura ${receiptId} se generó correctamente`, 'success');
       }
 
       setCart({});
@@ -317,11 +389,23 @@ export default function POSScreen() {
       setClientName(''); setClientNit(''); setClientPhone(''); setCashGiven('');
       setSaleDiscountId('');
     } catch (err) {
-      Alert.alert('Error', (err as Error).message);
+      showError((err as Error).message);
     } finally {
       setSaving(false);
     }
   };
+
+  // Mientras se resuelven el turno y la caja, el catálogo aún no ha llegado. La
+  // lista no se sustituye por un spinner: se dibujan las MISMAS filas que van a
+  // venir (`productRow` + `qtyRow`), porque esta tarjeta es la que manda sobre
+  // el alto del resto. Con la lista en el sitio, cuando entra el catálogo no
+  // se recoloca ni el carrito ni el total.
+  // Son TRES cosas distintas y solo la primera la cubre `cargandoLocs`: saber
+  // qué ubicaciones existen no es lo mismo que tener el catálogo. Con el
+  // esqueleto atado solo a `cargandoLocs`, una caja con las ubicaciones ya en
+  // caché mostraba "no hay productos" mientras llegaba la lista, y un
+  // mostrador vacío de verdad se confundía con uno que aún no había cargado.
+  const loadingCatalog = cargandoTurno || cargandoLocs || cargandoCatalogo;
 
   return (
     <View style={styles.wrap}>
@@ -329,8 +413,25 @@ export default function POSScreen() {
       {!online && (
         <View style={styles.offlineBanner}>
           <Text style={styles.offlineText}>
-            ⚡ MODO OFFLINE — las ventas se guardan y sincronizan solas{pendingCount > 0 ? ` (${pendingCount} pendientes)` : ''}
+            MODO OFFLINE — las ventas se guardan y sincronizan solas{pendingCount > 0 ? ` (${pendingCount} pendientes)` : ''}
           </Text>
+        </View>
+      )}
+
+      {/* La caja en la que se está trabajando, y cuánto lleva abierta. La web ya
+          lo tenía y el móvil no: el cajero no tenía forma de saber de un vistazo
+          dónde estaba cobrando. */}
+      {shift && <ShiftBadge shift={shift} onTerminar={terminarTurno} />}
+
+      {/* Aviso del servidor. NUNCA se trata como "no tienes turno": casi siempre
+          es una migración sin aplicar, y mandar a un cajero a abrir un turno que
+          no puede existir no arregla nada. */}
+      {avisoTurno && (
+        <View style={styles.offlineBanner}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+        <Icon name="alert" size={13} color={colors.warning} />
+        <Text style={styles.offlineText}>{avisoTurno}</Text>
+      </View>
         </View>
       )}
 
@@ -339,9 +440,10 @@ export default function POSScreen() {
       {myLocationName ? (
         <Text style={styles.locationLabel}>Vendiendo desde: <Text style={styles.locationName}>{myLocationName}</Text></Text>
       ) : null}
-      {/* El admin no tiene ubicación propia: el backend exige indicar cuál es,
-          así que puede cambiarla aquí antes de cobrar. */}
-      {needsLocationPicker && online && (
+      {/* El admin no tiene turno propio: el backend exige indicar cuál es, así
+          que puede cambiarla aquí antes de cobrar. Con un turno abierto no se
+          ofrece: la caja la dicta el turno. */}
+      {needsLocationPicker && online && locations.length > 0 && (
         <View style={styles.locationPicker}>
           <Field label="Ubicación de venta">
             <Sel
@@ -358,6 +460,37 @@ export default function POSScreen() {
           </Field>
         </View>
       )}
+
+      {/* Sin caja donde vender no se enseña un POS vacío: se dice qué hacer. Un
+          catálogo en blanco hace pensar que faltan productos, y no es eso. */}
+      {!pidiendoTurno && !myLocationId && !cargandoTurno && !cargandoLocs && !sinCache && (
+        <EmptyState
+          text={
+            needsLocationPicker
+              ? 'Elige arriba la ubicación desde la que vas a vender.'
+              : user?.role === 'almacenista'
+                ? 'No hay ningún almacén en esta empresa. Pídele al administrador que lo cree.'
+                : 'No tienes una caja asignada para vender. Pídele al administrador que te asigne una.'
+          }
+        />
+      )}
+
+      {/* Sin red y sin copia local de /locations no hay nada que mostrar, y hay
+          que decirlo: no es que no haya productos, es que no se sabe a qué caja
+          pertenece el catálogo. */}
+      {sinCache && (
+        <EmptyState text="Sin conexión y sin datos guardados de esta empresa. Conéctate una vez para poder trabajar sin internet después." />
+      )}
+
+      {/* Abrir turno. Bloquea el POS mientras esté abierto: vender sin saber en
+          qué caja es exactamente el descuadre que este arreglo elimina. */}
+      <ShiftSheet
+        visible={pidiendoTurno}
+        cajas={cajas}
+        offline={turnoSinRed}
+        onClose={() => setPidiendoTurno(false)}
+        onAbrir={abrirTurnoEn}
+      />
 
       {/* Buscador fijo con icono + botón agregar (igual que la web) */}
       <View style={styles.searchWrap}>
@@ -406,7 +539,27 @@ export default function POSScreen() {
           data={filtered}
           keyExtractor={(p) => p.id}
           style={styles.productList}
-          ListEmptyComponent={<EmptyState text="No hay productos disponibles" />}
+          ListEmptyComponent={
+            loadingCatalog && products.length === 0 ? (
+              <View>
+                {Array.from({ length: 6 }).map((_, i) => (
+                  <View key={i} style={[styles.productRow, i > 0 && styles.productRowSep]}>
+                    <View style={{ flex: 1, minWidth: 0, gap: 6 }}>
+                      <Skeleton w={`${58 + (i * 9) % 32}%`} h={13} />
+                      <Skeleton w="42%" h={11} />
+                    </View>
+                    <View style={styles.qtyRow}>
+                      <Skeleton w={28} h={28} r={8} />
+                      <Skeleton w={22} h={14} r={8} />
+                      <Skeleton w={28} h={28} r={8} />
+                    </View>
+                  </View>
+                ))}
+              </View>
+            ) : (
+              <EmptyState text="No hay productos disponibles" />
+            )
+          }
           renderItem={({ item: p, index }) => {
             const q = qtyFor(p.id);
             return (
@@ -465,7 +618,7 @@ export default function POSScreen() {
                         ]}
                       />
                     )}
-                    {ld > 0 && <Text style={{ color: '#DC2626', fontSize: 11, marginTop: 2 }}>Descuento: -{curSym}{fmt(ld)}</Text>}
+                    {ld > 0 && <Text style={{ color: colors.danger, fontSize: 11, marginTop: 2 }}>Descuento: -{curSym}{fmt(ld)}</Text>}
                   </View>
                   <Text style={styles.cartLineAmt}>{curSym}{fmt(l.qty * Number(l.product.price) - ld)}</Text>
                 </View>
@@ -571,7 +724,7 @@ export default function POSScreen() {
 
 const createStyles = () => StyleSheet.create({
   wrap: { flex: 1, backgroundColor: colors.bg },
-  offlineBanner: { backgroundColor: '#1A5C8B', padding: 8, alignItems: 'center' },
+  offlineBanner: { backgroundColor: colors.syncBusy, padding: 8, alignItems: 'center' },
   offlineText: { color: '#fff', fontSize: 12, fontWeight: '600' },
   pageTitle: { fontSize: 20, fontWeight: '800', color: colors.text, paddingHorizontal: 16, paddingTop: 12, marginBottom: 4 },
   locationLabel: { paddingHorizontal: 16, fontSize: 12, color: colors.textMuted, marginBottom: 10 },
@@ -581,7 +734,16 @@ const createStyles = () => StyleSheet.create({
   search: { borderWidth: 1, borderColor: colors.inputBorder, borderRadius: 12, paddingLeft: 34, paddingRight: 44, paddingVertical: 9, backgroundColor: colors.inputBg, fontSize: 14, color: colors.text },
   addUnique: { position: 'absolute', right: 22, top: '50%', transform: [{ translateY: -14 }], backgroundColor: colors.primaryTint, borderRadius: 8, paddingVertical: 4, paddingHorizontal: 7 },
   addUniqueText: { color: colors.primary, fontWeight: '800', fontSize: 13 },
-  listCard: { flex: 1, marginHorizontal: 16, marginBottom: 10, backgroundColor: colors.bgCard, borderRadius: 16, borderWidth: 1, borderColor: colors.border, overflow: 'hidden' },
+  // SIN `overflow: 'hidden'`, y no por descuido. Dentro de esta tarjeta caen
+  // los cuatro desplegables del ticket (pago, cliente, entrega, método), y la
+  // lista de cada uno se dibuja con `position: absolute` para no ser una
+  // ventana del sistema — ver el comentario de `Sel` en UI.tsx. Con recorte
+  // activo, esa lista se cortaría justo por donde empieza la tarjeta, y se vería
+  // una franja de opciones sin cerrar.
+  //
+  // El radio redondeado no se pierde: el borde lo dibuja la propia tarjeta, y
+  // las filas de productos de dentro ya traen su separador.
+  listCard: { flex: 1, marginHorizontal: 16, marginBottom: 10, backgroundColor: colors.bgCard, borderRadius: 16, borderWidth: 1, borderColor: colors.border },
   productList: { flex: 1 },
   productRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12, paddingHorizontal: 14 },
   productRowSep: { borderTopWidth: 1, borderTopColor: colors.border },
@@ -602,11 +764,11 @@ const createStyles = () => StyleSheet.create({
   cartLineAmt: { fontSize: 12, fontWeight: '700', color: colors.text },
   optsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, alignItems: 'flex-end' },
   discRow: { flexDirection: 'row', justifyContent: 'space-between' },
-  discRowText: { fontSize: 12, color: '#DC2626' },
-  changeText: { fontSize: 13, fontWeight: '700', color: '#10B981' },
+  discRowText: { fontSize: 12, color: colors.danger },
+  changeText: { fontSize: 13, fontWeight: '700', color: colors.success },
   footer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 2 },
   total: { fontSize: 18, fontWeight: '800', color: colors.text },
-  checkoutBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#10B981', paddingVertical: 10, paddingHorizontal: 20, borderRadius: 12 },
+  checkoutBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.success, paddingVertical: 10, paddingHorizontal: 20, borderRadius: 12 },
   checkoutText: { color: '#fff', fontWeight: '700', fontSize: 14 },
 });
 

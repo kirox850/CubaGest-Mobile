@@ -11,6 +11,16 @@
 // cuenta como permiso: es lo que el backend exige (requireModule("pos")) para
 // crear ventas y para POST /sales/sync. Por eso un admin sin "pos" no podría
 // vender aunque tenga todos los demás módulos.
+// Los colores van en HEX y no salen de `colors`, a diferencia de toda la app.
+// La razón es cuándo se evalúa esta tabla: es una constante de módulo, leída una
+// vez al importar. `colors` es un objeto vivo que `applyTheme` rellena DESPUÉS,
+// así que un `colors.success` aquí valdría el tema claro congelado y el rol
+// "contador" saldría con el verde apagado en modo oscuro, sin importar cuántas
+// veces se cambie el tema.
+//
+// Además tienen que ser hex de 6: `Badge` deriva el fondo de tinte con
+// `color + '20'`, y eso solo funciona con un hex de 6. Un token `rgba` del tema
+// oscuro daría un fondo invisible.
 export const ROLES: Record<string, { label: string; color: string; perms: string[] }> = {
   admin: {
     label: 'Administrador',
@@ -27,7 +37,7 @@ export const ROLES: Record<string, { label: string; color: string; perms: string
   },
   contador: {
     label: 'Contador',
-    color: '#10B981',
+    color: '#10B981',  // ≡ colors.success en claro. Ver la nota de arriba.
     perms: ['dashboard', 'contabilidad'],
   },
   almacenista: {

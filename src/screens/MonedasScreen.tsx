@@ -1,16 +1,64 @@
 import React, { useCallback, useState } from 'react';
-import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  TextInput, Alert, Switch,
-} from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Switch } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { SettingsAPI } from '../api/endpoints';
 import { colors, themeRef } from '../config/theme';
-import { ErrorBanner } from '../components/UI';
+import { ErrorBanner, Skeleton, showToast } from '../components/UI';
+import Icon from '../components/Icon';
+import { showError } from '../components/dialogs';
 
 const CURRENCY_OPTIONS = ['CUP', 'USD', 'EUR', 'MLC'];
 
-export default function MonedasScreen() {
+// ─── Esqueleto de Monedas ────────────────────────────────────────────────────
+// Esta pantalla no tenía spinner: pintaba el formulario entero con los valores
+// por defecto (solo CUP, tasas vacías) y los corregía en silencio al llegar la
+// respuesta. Durante ese rato el negocio parecía tener una moneda y ninguna
+// tasa. El esqueleto conserva la altura real de cada tarjeta —cuatro filas de
+// moneda, dos modos, tres campos de tasa, botón— para que al cargar los datos
+// no se mueva nada bajo el dedo.
+const MonedasEsqMonedas = () => (
+  <View style={styles.card}>
+    {CURRENCY_OPTIONS.map((m, i) => (
+      <View key={m} style={styles.curRow}>
+        <View style={{ flex: 1, gap: 6 }}>
+          <Skeleton w={44} h={15} />
+          {i === 0 && <Skeleton w={150} h={11} />}
+        </View>
+        <Skeleton w={44} h={26} r={13} />
+      </View>
+    ))}
+  </View>
+);
+
+const MonedasEsqTasas = () => (
+  <View>
+    <View style={styles.card}>
+      {[0, 1].map((i) => (
+        <View key={i} style={styles.modeRow}>
+          <Skeleton w={14} h={14} r={7} />
+          <View style={{ flex: 1, gap: 6 }}>
+            <Skeleton w={i === 0 ? 62 : 130} h={14} />
+            <Skeleton w="80%" h={11} />
+          </View>
+        </View>
+      ))}
+    </View>
+    <View style={styles.card}>
+      <View style={styles.ratesHint}>
+        <Skeleton w="65%" h={12} />
+      </View>
+      {['USD', 'EUR', 'MLC'].map((m) => (
+        <View key={m} style={styles.rateRow}>
+          <Skeleton w={44} h={14} />
+          <Skeleton style={{ flex: 1, height: 34, borderWidth: 1, borderColor: colors.border, borderRadius: 10 }} />
+        </View>
+      ))}
+    </View>
+    <Skeleton w="100%" h={46} r={12} style={{ marginTop: 4 }} />
+  </View>
+);
+
+export default function MonedasScreen({ embedded = false }: { embedded?: boolean }) {
   const [currencies, setCurrencies] = useState<string[]>(['CUP']);
   const [rateMode, setRateMode] = useState<'manual' | 'eltoque'>('manual');
   const [manualRates, setManualRates] = useState<Record<string, string>>({ USD: '', EUR: '', MLC: '' });
@@ -45,7 +93,7 @@ export default function MonedasScreen() {
 
   const save = async () => {
     if (currencies.length === 0) {
-      Alert.alert('Configuración inválida', 'Debe haber al menos una moneda (CUP).');
+      showError('Configuración inválida: ' + 'Debe haber al menos una moneda (CUP).');
       return;
     }
     setSaving(true);
@@ -56,10 +104,10 @@ export default function MonedasScreen() {
         if (v && !isNaN(n) && n > 0) mr[k] = n;
       }
       await SettingsAPI.update({ currencies, rateMode, manualRates: mr });
-      Alert.alert('✓ Guardado', 'La configuración de monedas se actualizó.');
+      showToast('La configuración de monedas se actualizó', 'success');
       load();
     } catch (e) {
-      Alert.alert('Error', (e as Error).message);
+      showError((e as Error).message);
     } finally {
       setSaving(false);
     }
@@ -69,12 +117,13 @@ export default function MonedasScreen() {
     <ScrollView style={styles.wrap} contentContainerStyle={{ padding: 12, paddingBottom: 32 }}>
       <ErrorBanner message={error} />
 
-      <Text style={styles.title}>Monedas del negocio</Text>
+{!embedded && <Text style={styles.title}>Monedas del negocio</Text>}
       <Text style={styles.hint}>
         Selecciona las monedas en las que opera tu negocio. Estarán disponibles
         para registrar productos y vender. CUP es la moneda base y siempre está activa.
       </Text>
 
+      {loading ? <MonedasEsqMonedas /> : (
       <View style={styles.card}>
         {CURRENCY_OPTIONS.map((m) => {
           const locked = m === 'CUP';
@@ -85,13 +134,14 @@ export default function MonedasScreen() {
                 <Text style={[styles.curName, locked && { color: colors.textMuted }]}>{m}</Text>
                 {locked && <Text style={styles.curHint}>moneda base — siempre activa</Text>}
               </View>
-              <Switch value={on} disabled={locked} onValueChange={() => toggleCurrency(m)} thumbColor={on ? colors.primary : '#CBD5E1'} trackColor={{ true: colors.primaryLight, false: colors.border }} />
+              <Switch value={on} disabled={locked} onValueChange={() => toggleCurrency(m)} thumbColor={on ? colors.primary : colors.textSecondary} trackColor={{ true: colors.primaryLight, false: colors.border }} />
             </View>
           );
         })}
-      </View>
+      </View>)}
 
       <Text style={styles.title}>Tasa de cambio</Text>
+      {loading ? <MonedasEsqTasas /> : (<>
       <View style={styles.card}>
         <TouchableOpacity style={styles.modeRow} onPress={() => setRateMode('manual')}>
           <Text style={[styles.modeDot, rateMode === 'manual' && styles.modeDotOn]}>●</Text>
@@ -146,6 +196,7 @@ export default function MonedasScreen() {
       >
         <Text style={styles.saveText}>{saving ? 'Guardando...' : 'Guardar configuración'}</Text>
       </TouchableOpacity>
+      </>)}
     </ScrollView>
   );
 }
@@ -159,7 +210,7 @@ const createStyles = () => StyleSheet.create({
   curName: { fontSize: 15, fontWeight: '700', color: colors.text },
   curHint: { fontSize: 11, color: colors.textMuted },
   modeRow: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, borderBottomWidth: 1, borderBottomColor: colors.borderLight },
-  modeDot: { fontSize: 16, color: '#CBD5E1' },
+  modeDot: { fontSize: 16, color: colors.textSecondary },
   modeDotOn: { color: colors.primary },
   modeName: { fontSize: 14, fontWeight: '700', color: colors.text },
   modeHint: { fontSize: 11, color: colors.textMuted, marginTop: 1 },

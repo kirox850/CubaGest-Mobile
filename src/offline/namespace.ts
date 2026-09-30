@@ -102,6 +102,9 @@ async function writeHint(userId: string, locationId: string): Promise<void> {
   }
 }
 
+/** Escribe la pista de ubicación de un usuario. */
+export const writeLocationHint = writeHint;
+
 // ── Namespace activo ────────────────────────────────────────────────────────
 
 /**

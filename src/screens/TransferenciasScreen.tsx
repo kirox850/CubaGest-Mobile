@@ -1,13 +1,12 @@
 import React, { useCallback, useState } from 'react';
-import {
-  View, Text, StyleSheet, FlatList, TextInput,
-  TouchableOpacity, Modal, Alert, ScrollView,
-} from 'react-native';
+import { View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, Modal, ScrollView } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { TransfersAPI, LocationsAPI } from '../api/endpoints';
 import { useAuth } from '../context/AuthContext';
 import { colors, themeRef } from '../config/theme';
-import { Badge, EmptyState, ErrorBanner } from '../components/UI';
+import { Badge, EmptyState, ErrorBanner, showToast, SkeletonRows } from '../components/UI';
+import { showConfirm, showError } from '../components/dialogs';
+import Icon from '../components/Icon';
 import type { Location, LocationStockItem, Transfer } from '../types';
 
 const fmt = (n: number) => Number(n || 0).toFixed(2);
@@ -15,7 +14,7 @@ const fmtDate = (d: string) =>
   d ? new Date(d).toLocaleString('es-CU', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—';
 
 const STATUS_BADGE: Record<string, { label: string; color: string }> = {
-  pendiente: { label: 'Pendiente', color: '#F97316' },
+  pendiente: { label: 'Pendiente', color: colors.warning },
   aprobado: { label: 'Aprobado', color: colors.success },
   rechazado: { label: 'Rechazado', color: colors.danger },
   cancelado: { label: 'Cancelado', color: colors.textMuted },
@@ -120,24 +119,24 @@ export default function TransferenciasScreen() {
       setToLocationId('');
       setModal(true);
     } catch (e) {
-      Alert.alert('Error', (e as Error).message);
+      showError((e as Error).message);
     }
   };
 
   const addItem = () => {
     const p = stockItems.find((i) => i.id === selProductId);
     const q = Number(selQty);
-    if (!p || !q || q <= 0) return Alert.alert('Error', 'Seleccione producto y cantidad válida');
-    if (q > Number(p.stock)) return Alert.alert('Stock insuficiente', `Disponible: ${p.stock}`);
+    if (!p || !q || q <= 0) return showError('Seleccione producto y cantidad válida');
+    if (q > Number(p.stock)) return showError('Stock insuficiente: ' + `Disponible: ${p.stock}`);
     setSelItems((prev) => [...prev.filter((i) => i.productId !== p.id), { productId: p.id, name: p.name, qty: q }]);
     setSelProductId('');
     setSelQty('');
   };
 
   const createTransfer = async () => {
-    if (isAdmin && !fromLocationId) return Alert.alert('Error', 'Seleccione la ubicación de origen');
-    if (!toLocationId) return Alert.alert('Error', 'Seleccione ubicación de destino');
-    if (selItems.length === 0) return Alert.alert('Error', 'Agregue al menos un producto');
+    if (isAdmin && !fromLocationId) return showError('Seleccione la ubicación de origen');
+    if (!toLocationId) return showError('Seleccione ubicación de destino');
+    if (selItems.length === 0) return showError('Agregue al menos un producto');
     setSaving(true);
     try {
       await TransfersAPI.create({
@@ -150,27 +149,21 @@ export default function TransferenciasScreen() {
       setModal(false);
       load();
     } catch (e) {
-      Alert.alert('Error', (e as Error).message);
+      showError((e as Error).message);
     } finally {
       setSaving(false);
     }
   };
 
   const approve = async (t: Transfer) => {
-    Alert.alert('Aprobar envío', 'Se moverá el stock del origen al destino. ¿Continuar?', [
-      { text: 'Cancelar', style: 'cancel' },
-      {
-        text: 'Aprobar', style: 'default', onPress: async () => {
-          try {
-            await TransfersAPI.approve(t.id);
-            Alert.alert('✓', 'Envío aprobado');
-            load();
-          } catch (e) {
-            Alert.alert('Error', (e as Error).message);
-          }
-        },
-      },
-    ]);
+    if (!(await showConfirm('Se moverá el stock del origen al destino. ¿Continuar?'))) return;
+    try {
+      await TransfersAPI.approve(t.id);
+      showToast('Envío aprobado', 'success');
+      load();
+    } catch (e) {
+      showError((e as Error).message);
+    };
   };
 
   const reject = async () => {
@@ -182,26 +175,20 @@ export default function TransferenciasScreen() {
       setRejectReason('');
       load();
     } catch (e) {
-      Alert.alert('Error', (e as Error).message);
+      showError((e as Error).message);
     } finally {
       setSaving(false);
     }
   };
 
   const cancel = async (t: Transfer) => {
-    Alert.alert('Cancelar envío', '¿Seguro que desea cancelar este envío?', [
-      { text: 'No', style: 'cancel' },
-      {
-        text: 'Sí, cancelar', style: 'destructive', onPress: async () => {
-          try {
-            await TransfersAPI.cancel(t.id);
-            load();
-          } catch (e) {
-            Alert.alert('Error', (e as Error).message);
-          }
-        },
-      },
-    ]);
+    if (!(await showConfirm('¿Seguro que desea cancelar este envío?'))) return;
+    try {
+      await TransfersAPI.cancel(t.id);
+      load();
+    } catch (e) {
+      showError((e as Error).message);
+    }
   };
 
   return (
@@ -228,7 +215,19 @@ export default function TransferenciasScreen() {
         keyExtractor={(t) => t.id}
         contentContainerStyle={{ paddingBottom: 24 }}
         ListEmptyComponent={
-          <EmptyState icon="🚚" text={tab === 'pendientes' ? 'No hay envíos pendientes' : 'No hay envíos registrados todavía'} />
+          // ─── Esqueleto de carga ───────────────────────────────────────────
+          // La tarjeta de un envío es ruta, fecha y línea de detalle. El
+          // esqueleto repite esa tarjeta con tres barras, así que al llegar los
+          // envíos la lista conserva el alto y no hay recolocamiento. El margen
+          // negativo compensa el padding propio de `SkeletonRows` para que las
+          // tarjetas midan lo mismo que las reales.
+          loading ? (
+            <View style={{ margin: -12 }}>
+              <SkeletonRows n={5} h={78} />
+            </View>
+          ) : (
+            <EmptyState icon="transferencias" text={tab === 'pendientes' ? 'No hay envíos pendientes' : 'No hay envíos registrados todavía'} />
+          )
         }
         renderItem={({ item: t }) => {
           const st = STATUS_BADGE[t.status] || { label: t.status, color: colors.textMuted };
@@ -243,7 +242,12 @@ export default function TransferenciasScreen() {
                 <View style={{ flex: 1 }}>
                   <Text style={styles.route}>{locName(t.fromLocationId)} → {locName(t.toLocationId)}</Text>
                   <Text style={styles.cardSub}>{fmtDate(t.createdAt)} · Por {t.requestedBy?.name || '—'}</Text>
-                  {t.notes ? <Text style={styles.cardSub}>📝 {t.notes}</Text> : null}
+                  {t.notes ? (
+                      <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 6 }}>
+                        <Icon name="doc" size={13} color={colors.textMuted} />
+                        <Text style={[styles.cardSub, { flex: 1 }]}>{t.notes}</Text>
+                      </View>
+                    ) : null}
                 </View>
                 <Badge label={st.label} color={st.color} />
               </View>
@@ -300,7 +304,7 @@ export default function TransferenciasScreen() {
                             setFromLocationId(l.id);
                             setSelItems([]);
                             loadSourceStock(l.id).catch((e) =>
-                              Alert.alert('Error', (e as Error).message),
+                              showError((e as Error).message),
                             );
                           }}
                         >
@@ -368,7 +372,7 @@ export default function TransferenciasScreen() {
               <View key={i.productId} style={styles.selItemRow}>
                 <Text style={styles.selItemText}>{i.qty}x {i.name}</Text>
                 <TouchableOpacity onPress={() => setSelItems((prev) => prev.filter((x) => x.productId !== i.productId))}>
-                  <Text style={{ color: colors.danger, fontWeight: '700' }}>✕</Text>
+                  <Icon name="close" size={15} color={colors.danger} />
                 </TouchableOpacity>
               </View>
             ))}
@@ -440,7 +444,7 @@ const createStyles = () => StyleSheet.create({
   actionsRow: { flexDirection: 'row', gap: 8, marginTop: 10 },
   btnApprove: { backgroundColor: colors.success, paddingVertical: 8, paddingHorizontal: 14, borderRadius: 8, flex: 1, alignItems: 'center' },
   btnApproveText: { color: '#fff', fontWeight: '700', fontSize: 12 },
-  btnReject: { backgroundColor: '#FEF2F2', borderWidth: 1, borderColor: '#FECACA', paddingVertical: 8, paddingHorizontal: 14, borderRadius: 8, flex: 1, alignItems: 'center' },
+  btnReject: { backgroundColor: colors.dangerBg, borderWidth: 1, borderColor: colors.dangerLight, paddingVertical: 8, paddingHorizontal: 14, borderRadius: 8, flex: 1, alignItems: 'center' },
   btnRejectText: { color: colors.danger, fontWeight: '700', fontSize: 12 },
   btnCancel: { paddingVertical: 10, paddingHorizontal: 14 },
   btnCancelText: { color: colors.textMuted, fontWeight: '600', fontSize: 12 },

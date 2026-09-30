@@ -26,7 +26,7 @@ export async function shareCSV(
   if (!csv) return;
   try {
     await Share.share({
-      message: `📎 ${filename} (${new Date().toISOString().slice(0, 10)})\n\n${csv}`,
+      message: `${filename} (${new Date().toISOString().slice(0, 10)})\n\n${csv}`,
       title: `${filename}.csv`,
     });
   } catch {

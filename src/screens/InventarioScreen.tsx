@@ -1,18 +1,16 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import {
-  View, Text, StyleSheet, FlatList, TextInput,
-  TouchableOpacity, Modal, Alert, ScrollView,
-  KeyboardAvoidingView, Platform,
-} from 'react-native';
+import { View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, Modal, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { ProductsAPI, LocationsAPI } from '../api/endpoints';
 import { useAuth } from '../context/AuthContext';
 import { colors, themeRef } from '../config/theme';
 import { CAN_MANAGE_INVENTORY, CATEGORIES } from '../config/roles';
-import { Badge, EmptyState, ErrorBanner, Btn, Inp, Sel } from '../components/UI';
+import { Badge, EmptyState, ErrorBanner, Btn, Field, Inp, Sel, SkeletonRows } from '../components/UI';
+import { showConfirm, showError } from '../components/dialogs';
 import Icon from '../components/Icon';
 import { shareCSV } from '../utils/csv';
-import { cacheProducts } from '../offline/offlineStore';
+import { cacheProducts, getOfflineProducts, cacheLocations, getOfflineLocations } from '../offline/offlineStore';
+import type { OfflineProduct } from '../offline/offlineStore';
 import type { Location, LocationStockItem, Product } from '../types';
 
 const EMPTY_PRODUCT = {
@@ -53,10 +51,33 @@ export default function InventarioScreen() {
   const selectedLocName = locations.find((l) => l.id === selectedLocId)?.name || '';
   const myLabel = !isAdmin && selectedLocName ? `Ubicación: ${selectedLocName}` : '';
 
+  // El catálogo cacheado (`OfflineProduct`) y la fila de stock que pinta esta
+  // pantalla (`LocationStockItem`) no son la misma forma: al cachear quedan
+  // fuera `businessId` y `minStock`. Se convierte campo a campo en vez de
+  // castear, porque un casteo ocultaría justo los campos que el formulario de
+  // edición usa al abrir un producto desde la lista sin red.
+  const desdeCache = (p: OfflineProduct): LocationStockItem => ({
+    id: p.id,
+    businessId: '',
+    code: p.code,
+    name: p.name,
+    category: p.category,
+    unit: p.unit,
+    price: p.price,
+    cost: p.cost,
+    // Sin red, lo vendible es `localStock`: el stock del servidor menos lo que
+    // este dispositivo ya vendió sin sincronizar. Pintar `stock` ofrecería
+    // mercancía que ya no existe.
+    stock: p.localStock ?? p.stock,
+    minStock: 0,
+    active: p.active,
+  });
+
   const loadLocations = useCallback(async () => {
     try {
       const locs = await LocationsAPI.list();
       setLocations(locs);
+      void cacheLocations(locs).catch(() => {});
       setSelectedLocId((prev) => {
         if (prev) return prev;
         if (user?.role === 'almacenista') {
@@ -68,7 +89,16 @@ export default function InventarioScreen() {
         return locs.find((l) => l.type === 'almacen')?.id || locs[0]?.id || '';
       });
     } catch (err) {
-      setError((err as Error).message);
+      // Sin red, las ubicaciones de la cuenta siguen guardadas: sin ellas el
+      // inventario no tiene contra qué consultar el stock.
+      const local = await getOfflineLocations();
+      if (local.length > 0) {
+        setLocations(local);
+        setSelectedLocId((prev) => prev || local.find((l) => l.type === 'caja' && l.active !== false)?.id || local[0]?.id || '');
+        setError('Sin conexión con el servidor — usando las ubicaciones guardadas en este dispositivo');
+      } else {
+        setError((err as Error).message);
+      }
     }
   }, [user?.id, user?.role]);
 
@@ -85,7 +115,15 @@ export default function InventarioScreen() {
       if (user?.role !== 'admin') await cacheProducts(items, selectedLocId);
       setLoading(false);
     } catch (err) {
-      setError((err as Error).message);
+      // Sin red se muestra el catálogo cacheado de ESA ubicación. El stock de
+      // una caja no es el de otra: solo se pinta el de la caja activa.
+      const local = await getOfflineProducts();
+      if (local.length > 0) {
+        setProducts(local.map(desdeCache));
+        setError('Sin conexión con el servidor — mostrando el inventario guardado en este dispositivo');
+      } else {
+        setError((err as Error).message);
+      }
       setLoading(false);
     }
   }, [selectedLocId, user?.role]);
@@ -118,7 +156,7 @@ export default function InventarioScreen() {
   const saveAdjust = async () => {
     const n = Number(qty);
     if (!n || n <= 0)
-      return Alert.alert('Cantidad invalida', 'Ingrese una cantidad mayor a 0');
+      return showError('Cantidad invalida: ' + 'Ingrese una cantidad mayor a 0');
     try {
       // Endpoint real del backend: POST /locations/:id/adjust — el viejo
       // /products/:id/adjust-stock ya no existe.
@@ -131,7 +169,7 @@ export default function InventarioScreen() {
       setSelected(null);
       load();
     } catch (err) {
-      Alert.alert('Error', (err as Error).message);
+      showError((err as Error).message);
     }
   };
 
@@ -160,12 +198,12 @@ export default function InventarioScreen() {
 
   const saveProduct = async () => {
     if (!form.code.trim() || !form.name.trim() || !form.price) {
-      Alert.alert('Campos requeridos', 'Codigo, nombre y precio son obligatorios.');
+      showError('Campos requeridos: ' + 'Codigo, nombre y precio son obligatorios.');
       return;
     }
     const price = Number(form.price);
     if (isNaN(price) || price < 0) {
-      Alert.alert('Precio invalido', 'Ingrese un precio valido mayor o igual a 0.');
+      showError('Precio invalido: ' + 'Ingrese un precio valido mayor o igual a 0.');
       return;
     }
 
@@ -193,7 +231,7 @@ export default function InventarioScreen() {
       setProductModal(false);
       load();
     } catch (err) {
-      Alert.alert('Error al guardar', (err as Error).message);
+      showError((err as Error).message);
     } finally {
       setSaving(false);
     }
@@ -205,38 +243,19 @@ export default function InventarioScreen() {
       await ProductsAPI.reactivate(id);
       load();
     } catch (err) {
-      Alert.alert('Error', (err as Error).message);
+      showError((err as Error).message);
     }
   };
 
-  const confirmDelete = (p: Product) => {
-    Alert.alert(
-      'Desactivar producto',
-      `¿Desactivar "${p.name}"? No se eliminará, solo se ocultará del inventario.`,
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Desactivar',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await ProductsAPI.remove(p.id);
-              load();
-            } catch (err) {
-              Alert.alert('Error', (err as Error).message);
-            }
-          },
-        },
-      ],
-    );
+  const confirmDelete = async (p: Product) => {
+    if (!(await showConfirm(`¿Desactivar "${p.name}"? No se eliminará, solo se ocultará del inventario.`))) return;
+    try {
+      await ProductsAPI.remove(p.id);
+      load();
+    } catch (err) {
+      showError((err as Error).message);
+    };
   };
-
-  const Field = ({ label, ...props }: { label: string } & React.ComponentProps<typeof TextInput>) => (
-    <View style={{ marginBottom: 10 }}>
-      <Text style={styles.fieldLabel}>{label}</Text>
-      <TextInput style={styles.fieldInput} placeholderTextColor={colors.textMuted} {...props} />
-    </View>
-  );
 
   return (
     <View style={styles.wrap}>
@@ -311,7 +330,22 @@ export default function InventarioScreen() {
         data={filtered}
         keyExtractor={(p) => p.id}
         contentContainerStyle={{ paddingBottom: 24 }}
-        ListEmptyComponent={<EmptyState text={loading ? 'Cargando...' : 'No hay productos'} />}
+        // ─── Esqueleto de carga ─────────────────────────────────────────────
+        // La fila real de inventario son tres líneas con borde: nombre, código y
+        // precio. El esqueleto dibuja esa misma tarjeta (tres barras con marco),
+        // de modo que cuando aterrizan los productos la lista ocupa el mismo
+        // alto y la pantalla no salta. El margen negativo compensa el padding
+        // propio de `SkeletonRows`: si no, las tarjetas saldrían 16 px más
+        // angostas que las reales y el ajuste se notaría al cargar.
+        ListEmptyComponent={
+          loading ? (
+            <View style={{ margin: -16 }}>
+              <SkeletonRows n={6} h={78} />
+            </View>
+          ) : (
+            <EmptyState text="No hay productos" />
+          )
+        }
         renderItem={({ item }) => {
           const low = Number(item.stock) <= Number(item.minStock);
           const p = item as any;
@@ -325,8 +359,10 @@ export default function InventarioScreen() {
                 <Text style={styles.price}>
                   {(p.currency === 'EUR' ? '€' : '$')}{Number(item.price).toFixed(2)}
                   <Text style={styles.unit}> {(p.currency || 'CUP')}</Text>
-                  {'  '}Stock: <Text style={{ color: low ? '#F97316' : '#10B981', fontWeight: '700' }}>{item.stock}</Text>
-                  {low ? ' ⚠ BAJO' : ''}
+                  {'  '}Stock: <Text style={{ color: low ? colors.warning : colors.success, fontWeight: '700' }}>{item.stock}</Text>
+                  {low ? (
+                    <Text style={{ color: colors.warning, fontWeight: '700' }}> · stock bajo</Text>
+                  ) : null}
                 </Text>
                 {canManage && (
                   <View style={{ flexDirection: 'row', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
@@ -338,7 +374,7 @@ export default function InventarioScreen() {
                   </View>
                 )}
               </View>
-              <Badge label={p.active !== false ? 'Activo' : 'Inactivo'} color={p.active !== false ? '#10B981' : '#888'} />
+              <Badge label={p.active !== false ? 'Activo' : 'Inactivo'} color={p.active !== false ? colors.success : colors.textMuted} />
             </View>
           );
         }}
@@ -418,68 +454,85 @@ export default function InventarioScreen() {
               </Text>
 
               <ScrollView showsVerticalScrollIndicator={false}>
-                <Field
-                  label="Codigo *"
-                  value={form.code}
-                  onChangeText={(v: string) => setForm((f) => ({ ...f, code: v }))}
-                  placeholder="Ej: P001"
-                  autoCapitalize="characters"
-                  editable={!editing}
-                />
-                <Field
-                  label="Codigo de barras"
-                  value={form.barcode}
-                  onChangeText={(v: string) => setForm((f) => ({ ...f, barcode: v }))}
-                  placeholder="Escanea o digita (opcional)"
-                />
-                <Field
-                  label="Nombre *"
-                  value={form.name}
-                  onChangeText={(v: string) => setForm((f) => ({ ...f, name: v }))}
-                  placeholder="Nombre del producto"
-                />
-                <Field
-                  label="Categoria"
-                  value={form.category}
-                  onChangeText={(v: string) => setForm((f) => ({ ...f, category: v }))}
-                  placeholder="Ej: Alimentos"
-                />
-                <Field
-                  label="Unidad de medida"
-                  value={form.unit}
-                  onChangeText={(v: string) => setForm((f) => ({ ...f, unit: v }))}
-                  placeholder="ud / kg / litro..."
-                />
-                <Field
-                  label={`Precio de venta (${form.currency || 'CUP'}) *`}
-                  value={form.price}
-                  onChangeText={(v: string) => setForm((f) => ({ ...f, price: v }))}
-                  placeholder="0.00"
-                  keyboardType="decimal-pad"
-                />
-                <Field
-                  label="Costo (CUP)"
-                  value={form.cost}
-                  onChangeText={(v: string) => setForm((f) => ({ ...f, cost: v }))}
-                  placeholder="0.00"
-                  keyboardType="decimal-pad"
-                />
+                <Field label="Codigo" required>
+                  <Inp
+                    value={form.code}
+                    onChangeText={(v: string) => setForm((f) => ({ ...f, code: v }))}
+                    placeholder="Ej: P001"
+                    autoCapitalize="characters"
+                    editable={!editing}
+                  />
+                </Field>
+                <Field label="Codigo de barras">
+                  <Inp
+                    value={form.barcode}
+                    onChangeText={(v: string) => setForm((f) => ({ ...f, barcode: v }))}
+                    placeholder="Escanea o digita (opcional)"
+                  />
+                </Field>
+                <Field label="Nombre" required>
+                  <Inp
+                    value={form.name}
+                    onChangeText={(v: string) => setForm((f) => ({ ...f, name: v }))}
+                    placeholder="Nombre del producto"
+                  />
+                </Field>
+                <Field label="Categoria">
+                  <Inp
+                    value={form.category}
+                    onChangeText={(v: string) => setForm((f) => ({ ...f, category: v }))}
+                    placeholder="Ej: Alimentos"
+                  />
+                </Field>
+                <Field label="Unidad de medida">
+                  <Inp
+                    value={form.unit}
+                    onChangeText={(v: string) => setForm((f) => ({ ...f, unit: v }))}
+                    placeholder="ud / kg / litro..."
+                  />
+                </Field>
+                <Field label="Precio de venta (${form.currency || 'CUP'})" required>
+                  <Inp
+                    value={form.price}
+                    onChangeText={(v: string) => setForm((f) => ({ ...f, price: v }))}
+                    placeholder="0.00"
+                    keyboardType="decimal-pad"
+                  />
+                </Field>
+                <Field label="Costo (CUP)">
+                  <Inp
+                    value={form.cost}
+                    onChangeText={(v: string) => setForm((f) => ({ ...f, cost: v }))}
+                    placeholder="0.00"
+                    keyboardType="decimal-pad"
+                  />
+                </Field>
                 {!editing && (
-                  <Field
-                    label="Stock inicial"
+                  <Field label="Stock inicial">
+                    <Inp
+                      value={form.stock}
+                      onChangeText={(v: string) => setForm((f) => ({ ...f, stock: v }))}
+                      placeholder="0"
+                      keyboardType="numeric"
+                    />
+                  </Field>
+                )}
+                <Field label="Stock inicial">
+                  <Inp
                     value={form.stock}
                     onChangeText={(v: string) => setForm((f) => ({ ...f, stock: v }))}
                     placeholder="0"
                     keyboardType="numeric"
                   />
-                )}
-                <Field
-                  label="Stock minimo (alerta)"
-                  value={form.minStock}
-                  onChangeText={(v: string) => setForm((f) => ({ ...f, minStock: v }))}
-                  placeholder="0"
-                  keyboardType="numeric"
-                />
+                </Field>
+                <Field label="Stock minimo (alerta)">
+                  <Inp
+                    value={form.minStock}
+                    onChangeText={(v: string) => setForm((f) => ({ ...f, minStock: v }))}
+                    placeholder="0"
+                    keyboardType="numeric"
+                  />
+                </Field>
               </ScrollView>
 
               <View style={[styles.modalActions, { marginTop: 16 }]}>
@@ -537,7 +590,7 @@ const createStyles = () => StyleSheet.create({
     backgroundColor: colors.inputBg,
   },
   locChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
-  locChipText: { fontSize: 12.5, fontWeight: '600', color: colors.text, maxWidth: 130 },
+  locChipText: { fontSize: 12, fontWeight: '600', color: colors.text, maxWidth: 130 },
   locLabel: { fontSize: 12, color: colors.textMuted, marginBottom: 8, fontWeight: '600' },
   search: {
     borderWidth: 1,
@@ -622,23 +675,6 @@ const createStyles = () => StyleSheet.create({
     borderRadius: 12,
   },
 
-  fieldLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: colors.textMuted,
-    textTransform: 'uppercase',
-    marginBottom: 4,
-  },
-  fieldInput: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 12,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    fontSize: 14,
-    color: colors.text,
-    backgroundColor: colors.bg,
-  },
 });
 
 // Estilos VIVOS: se reconstruyen cuando cambia el tema (dark mode).

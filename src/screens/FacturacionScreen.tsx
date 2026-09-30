@@ -1,17 +1,17 @@
 import React, { useCallback, useState } from 'react';
-import {
-  View, Text, StyleSheet, FlatList, TextInput,
-  TouchableOpacity, Alert, ScrollView, Modal,
-} from 'react-native';
+import { View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, ScrollView, Modal } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { SalesAPI } from '../api/endpoints';
 import { useAuth } from '../context/AuthContext';
 import { useSync } from '../context/SyncContext';
 import { colors, themeRef } from '../config/theme';
 import { PAY_METHODS, CURRENCY_SYMBOLS } from '../config/roles';
-import { EmptyState, ErrorBanner, Badge, Btn, Inp, Sel } from '../components/UI';
+import { EmptyState, ErrorBanner, Badge, Btn, Inp, Sel, Skeleton, showToast } from '../components/UI';
+import { showConfirm, showError } from '../components/dialogs';
 import Icon from '../components/Icon';
 import { shareCSV } from '../utils/csv';
+import { mergeSales, type MergedSaleRow } from '../config/mergeSales';
+import { getAllOfflineSales, cacheSales, getOfflineSales } from '../offline/offlineStore';
 import type { Sale } from '../types';
 import type { OfflineSale } from '../offline/offlineStore';
 
@@ -20,24 +20,75 @@ const fmt = (n: number) => Number(n || 0).toFixed(2);
 export default function FacturacionScreen() {
   const { user, online } = useAuth();
   const { offlineSales, syncNow, syncing, refresh: refreshSync } = useSync();
-  const [sales, setSales] = useState<Sale[]>([]);
+  const [sales, setSales] = useState<MergedSaleRow[]>([]);
   const [search, setSearch] = useState('');
   const [error, setError] = useState('');
+  const [cargandoVentas, setCargandoVentas] = useState(true);
   const [syncMsg, setSyncMsg] = useState('');
-  const [viewInv, setViewInv] = useState<Sale | null>(null);
+  const [viewInv, setViewInv] = useState<MergedSaleRow | null>(null);
   const [editModal, setEditModal] = useState(false);
   const [editForm, setEditForm] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
 
+  // DOS PASOS, DOS `try`. Antes era uno solo que empezaba por la cola local: si
+  // la lectura de AsyncStorage fallaba, la excepción se comía la petición de
+  // facturas de al lado y estas nunca se pedían. La pantalla quedaba vacía y el
+  // aviso era el del error de almacenamiento, que no señalaba el problema real
+  // (el catálogo entero sí había llegado).
+  //
+  // Ahora el servidor va primero y en su propio try, y la cola local es un extra
+  // en el suyo. Un fallo de almacenamiento no puede volver a vaciar la lista de
+  // facturas, ni puede presentarse como la razón por la que está vacía.
   const load = useCallback(async () => {
-    try {
-      setError('');
-      const list = online ? await SalesAPI.list() : [];
-      setSales(list);
-      await refreshSync();
-    } catch (err) {
-      setError((err as Error).message);
+    setError('');
+    setCargandoVentas(true);
+    // Sin red, o si el servidor falla, la lista sale de la última copia
+    // guardada. Sin esto el cajero sin conexión veía únicamente las ventas que
+    // aún no habían subido, y las ya facturadas desaparecían de su propia
+    // pantalla: el mismo número dos veces, o entregar una factura a un cliente
+    // que ya la tenía.
+    const SIN_CONEXION = 'Sin conexión con el servidor — mostrando las facturas guardadas en este dispositivo';
+    let delServidor: Sale[] = [];
+    if (online) {
+      try {
+        delServidor = await SalesAPI.list();
+        void cacheSales(delServidor).catch(() => {});
+      } catch (err) {
+        try {
+          delServidor = await getOfflineSales();
+        } catch {
+          delServidor = [];
+        }
+        setError(delServidor.length > 0 ? SIN_CONEXION : (err as Error).message);
+      }
+    } else {
+      try {
+        delServidor = await getOfflineSales();
+      } catch {
+        delServidor = [];
+      }
+      if (delServidor.length > 0) setError(SIN_CONEXION);
     }
+    let cola: OfflineSale[] = [];
+    try {
+      // Se lee el almacén directamente, no `offlineSales` del contexto: ese
+      // valor es estado de React y aquí seguiría siendo el de la carga
+      // anterior, así que la lista mezclaría la cola vieja con la nueva.
+      cola = await getAllOfflineSales();
+    } catch {
+      // Sin la cola local se ven igual las facturas del servidor: la cola solo
+      // sirve para reintentar ventas que aún no han subido.
+      cola = [];
+    }
+    // Los contadores del banner (pendientes / conflictos) viven en el contexto.
+    try {
+      await refreshSync();
+    } catch {
+      // Son un extra informativo: si fallan, la lista de arriba es correcta
+      // igualmente y no hay por qué avisar de nada.
+    }
+    setSales(mergeSales(delServidor, cola));
+    setCargandoVentas(false);
   }, [online, refreshSync]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
@@ -65,7 +116,7 @@ export default function FacturacionScreen() {
     (s.clientName || s.client || '').toLowerCase().includes(search.toLowerCase()),
   );
 
-  const openEdit = (s: Sale) => {
+  const openEdit = (s: MergedSaleRow) => {
     setEditForm({
       clientName: s.clientName || s.client || '',
       clientNit: s.clientNit || '',
@@ -79,37 +130,44 @@ export default function FacturacionScreen() {
     setSaving(true);
     try {
       await SalesAPI.update(viewInv!.id, editForm);
-      Alert.alert('✓', 'Factura actualizada');
+      showToast('Factura actualizada', 'success');
       setEditModal(false);
       setViewInv(null);
       load();
     } catch (e) {
-      Alert.alert('Error', (e as Error).message);
+      showError((e as Error).message);
     } finally {
       setSaving(false);
     }
   };
 
   const voidSale = async (id: string) => {
-    Alert.alert('Anular factura', 'Seguro? El stock se repondra.', [
-      { text: 'Cancelar', style: 'cancel' },
-      {
-        text: 'Anular', style: 'destructive', onPress: async () => {
-          try {
-            await SalesAPI.voidSale(id);
-            Alert.alert('✓', 'Factura anulada');
-            setViewInv(null);
-            load();
-          } catch (e) {
-            Alert.alert('Error', (e as Error).message);
-          }
-        },
-      },
-    ]);
+    // Se anuncia el efecto ANTES de preguntar, no después: anular devuelve el
+    // stock al almacén y eso no se deshace.
+    if (!(await showConfirm('Se devolverá el stock al almacén. ¿Anular la factura?'))) return;
+    try {
+      await SalesAPI.voidSale(id);
+      showToast('Factura anulada', 'success');
+      setViewInv(null);
+      load();
+    } catch (e) {
+      showError((e as Error).message);
+    };
   };
 
   const pend = offlineSales.filter((s) => s.status === 'pending').length;
   const conf = offlineSales.filter((s) => s.status === 'conflict').length;
+
+  // El esqueleto de la lista replica la fila real de `styles.row` —columna
+  // izquierda con nº de factura, cliente y la tira de fecha + badge; columna
+  // derecha con importe, badge y el ojo— para que la lista entre por debajo de
+  // donde estaba sin empujar el buscador ni el header. Solo se usa mientras la
+  // lista sigue vacía: con facturas en pantalla la shimmer no pinta nada.
+  // `syncing` es del contexto y mide la cola offline, no esta petición: con
+  // `syncing` nada más, una cuenta sin facturas muestra "no hay facturas" y
+  // un instante después las tiene. Un esqueleto que se equivoca de fase es peor
+  // que un spinner, porque hace dudar del saldo.
+  const loadingSales = (syncing || cargandoVentas) && sales.length === 0;
 
   return (
     <View style={styles.wrap}>
@@ -140,13 +198,19 @@ export default function FacturacionScreen() {
       {(pendingOffline.length > 0 || conflictOffline.length > 0 || syncMsg) && (
         <View style={styles.offlineBox}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-            <Text style={styles.offlineTitle}>⚡ Ventas offline</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <Icon name="zap" size={15} color={colors.warning} />
+          <Text style={styles.offlineTitle}>Ventas offline</Text>
+        </View>
           </View>
           {syncMsg ? <Text style={styles.syncMsg}>{syncMsg}</Text> : null}
           {pendingOffline.map((s: OfflineSale) => (
             <View key={s.localId}>
               <View style={styles.offlineRow}>
-                <Text style={styles.offlineId}>⏳ {s.localId}</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                    <Icon name="clock" size={12} color={colors.textMuted} />
+                    <Text style={styles.offlineId}>{s.localId}</Text>
+                  </View>
                 <Text style={styles.offlineAmt}>${fmt(Number(s.total))}</Text>
               </View>
               {/* Por qué sigue pendiente: sin respuesta del servidor o sin
@@ -156,7 +220,10 @@ export default function FacturacionScreen() {
           ))}
           {conflictOffline.map((s: OfflineSale) => (
             <View key={s.localId} style={styles.offlineRow}>
-              <Text style={styles.offlineConflict}>⚠ {s.localId} — {s.conflictReason || 'Conflicto de stock'}</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                      <Icon name="alert" size={12} color={colors.danger} />
+                      <Text style={styles.offlineConflict}>{s.localId} — {s.conflictReason || 'Conflicto de stock'}</Text>
+                    </View>
               <Text style={styles.offlineAmt}>${fmt(Number(s.total))}</Text>
             </View>
           ))}
@@ -188,22 +255,55 @@ export default function FacturacionScreen() {
         data={filtered}
         keyExtractor={s => s.id}
         contentContainerStyle={{ paddingBottom: 24 }}
-        ListEmptyComponent={<EmptyState text={online ? 'No hay facturas' : 'Sin conexión — mostrando solo ventas locales'} />}
+        ListEmptyComponent={
+          loadingSales ? (
+            <View>
+              {Array.from({ length: 5 }).map((_, i) => (
+                <View key={i} style={styles.row}>
+                  <View style={{ flex: 1, minWidth: 0, gap: 6 }}>
+                    <Skeleton w="38%" h={13} />
+                    <Skeleton w={`${52 + (i * 8) % 30}%`} h={13} />
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <Skeleton w={72} h={11} r={5} />
+                      <Skeleton w={64} h={18} r={10} />
+                    </View>
+                  </View>
+                  <View style={{ alignItems: 'flex-end', gap: 4 }}>
+                    <Skeleton w={64} h={15} r={6} />
+                    <Skeleton w={58} h={18} r={10} />
+                    <Skeleton w={14} h={14} r={4} />
+                  </View>
+                </View>
+              ))}
+            </View>
+          ) : (
+            <EmptyState text={online ? 'No hay facturas' : 'Sin conexión — mostrando solo ventas locales'} />
+          )
+        }
         renderItem={({ item: s }) => (
           <TouchableOpacity style={[styles.row, s.status === 'anulada' && { opacity: 0.5 }]} onPress={() => setViewInv(s)}>
             <View style={{ flex: 1, minWidth: 0 }}>
-              <Text style={styles.invoice}>{s.invoiceNumber || s.id}</Text>
+              <Text style={styles.invoice}>{s.esOffline ? s.localId : (s.invoiceNumber || s.id)}</Text>
               <Text style={styles.client}>{s.clientName || s.client}</Text>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}>
                 <Text style={styles.date}>{(s.date || s.createdAt || '').split('T')[0]}</Text>
                 <Badge label={PAY_METHODS.find((p) => p.id === s.payMethod)?.label || s.payMethod} color={colors.primary} />
+                {/* Una venta sin sincronizar no se puede anular ni editar: aún
+                    no existe en el servidor, así que cualquier acción sobre su
+                    id local sería un 404. Se marca y se explica en su lugar. */}
+                {s.esOffline && (
+                  <Badge
+                    label={s.estadoOffline === 'conflict' ? 'Conflicto' : 'Sin sincronizar'}
+                    color={s.estadoOffline === 'conflict' ? colors.warningText : colors.warning}
+                  />
+                )}
               </View>
             </View>
             <View style={{ alignItems: 'flex-end', gap: 4 }}>
               <Text style={styles.amount}>{CURRENCY_SYMBOLS[s.currency] || '$'}{fmt(Number(s.total))}</Text>
               <Badge
                 label={s.status === 'emitida' ? 'Emitida' : 'Anulada'}
-                color={s.status === 'emitida' ? '#10B981' : colors.primary}
+                color={s.status === 'emitida' ? colors.success : colors.primary}
               />
               <Icon name="eye" size={14} color={colors.primary} />
             </View>
@@ -216,13 +316,29 @@ export default function FacturacionScreen() {
         <Modal visible animationType="slide" transparent onRequestClose={() => setViewInv(null)}>
           <View style={styles.modalBg}>
             <View style={styles.modalCard}>
-              <Text style={styles.modalTitle}>Factura {viewInv.invoiceNumber || viewInv.id}</Text>
+              <Text style={styles.modalTitle}>
+                {viewInv.esOffline ? `Venta ${viewInv.localId}` : `Factura ${viewInv.invoiceNumber || viewInv.id}`}
+              </Text>
+              {viewInv.esOffline && (
+                // Se dice sin rodeos que esta venta aún no está en el servidor.
+                // Un cajero que ve "LOCAL-0004" y nada más no sabe si se perdió
+                // o si solo está esperando.
+                <Text style={styles.note}>
+                  Cobrada sin conexión, todavía sin sincronizar.
+                  {viewInv.offlineHint ? ` ${viewInv.offlineHint}` : ''}
+                </Text>
+              )}
               <ScrollView>
                 <View style={styles.receipt}>
                   <Text style={styles.receiptCenter}>{user?.company?.name || 'Mi Negocio'}</Text>
                   <Text style={styles.receiptCenter}>FACTURA</Text>
                   <Text style={styles.receiptLine}>No. {viewInv.invoiceNumber || viewInv.id}</Text>
-                  {viewInv.status === 'anulada' && <Text style={[styles.receiptCenter, { color: colors.danger, fontWeight: '800' }]}>⚠ ANULADA</Text>}
+                  {viewInv.status === 'anulada' && (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5 }}>
+                      <Icon name="alert" size={13} color={colors.danger} />
+                      <Text style={[styles.receiptCenter, { color: colors.danger, fontWeight: '800' }]}>ANULADA</Text>
+                    </View>
+                  )}
                   <Text style={styles.receiptLine}>Fecha: {(viewInv.date || viewInv.createdAt || '').split('T')[0]}</Text>
                   <Text style={styles.receiptLine}>Cliente: {viewInv.clientName || viewInv.client}</Text>
                   {viewInv.clientNit && viewInv.clientNit !== '00000000000' && <Text style={styles.receiptLine}>Carnet: {viewInv.clientNit}</Text>}
@@ -240,12 +356,12 @@ export default function FacturacionScreen() {
                     <Text style={[styles.receiptLine, { fontWeight: '800' }]}>TOTAL:</Text>
                     <Text style={[styles.receiptLine, { fontWeight: '800' }]}>{CURRENCY_SYMBOLS[viewInv.currency] || '$'}{fmt(Number(viewInv.total))} {viewInv.currency || 'CUP'}</Text>
                   </View>
-                  <Text style={[styles.receiptCenter, { fontSize: 8, color: colors.textMuted, marginTop: 6 }]}>Hecho con CubaGest</Text>
+                  <Text style={[styles.receiptCenter, { fontSize: 10, color: colors.textMuted, marginTop: 6 }]}>Hecho con CubaGest</Text>
                 </View>
               </ScrollView>
 
               <View style={styles.modalActions}>
-                {viewInv.status === 'emitida' && (
+                {viewInv.status === 'emitida' && !viewInv.esOffline && (
                   <>
                     <TouchableOpacity style={styles.btnDanger} onPress={() => voidSale(viewInv.id)}>
                       <Text style={{ color: '#fff', fontWeight: '700' }}>Anular</Text>
@@ -302,13 +418,13 @@ const createStyles = () => StyleSheet.create({
   title: { fontSize: 22, fontWeight: '800', color: colors.text },
   subtitle: { fontSize: 14, color: colors.textMuted, marginTop: 2 },
   offlineBox: { backgroundColor: 'rgba(249,115,22,0.08)', borderRadius: 16, borderWidth: 1, borderColor: 'rgba(249,115,22,0.30)', padding: 16, marginBottom: 12 },
-  offlineTitle: { fontSize: 14, fontWeight: '700', color: '#C2410C' },
+  offlineTitle: { fontSize: 14, fontWeight: '700', color: colors.warningText },
   offlineRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 3 },
   offlineId: { fontSize: 12, fontWeight: '700', color: colors.primary, fontFamily: 'monospace' },
-  offlineConflict: { fontSize: 11, fontWeight: '600', color: '#C2410C', flex: 1, marginRight: 8 },
+  offlineConflict: { fontSize: 11, fontWeight: '600', color: colors.warningText, flex: 1, marginRight: 8 },
   offlineHint: { fontSize: 10, color: colors.textMuted, marginBottom: 4 },
   offlineAmt: { fontSize: 12, fontWeight: '700', color: colors.text },
-  syncMsg: { fontSize: 12, fontWeight: '600', color: '#C2410C', marginBottom: 6 },
+  syncMsg: { fontSize: 12, fontWeight: '600', color: colors.warningText, marginBottom: 6 },
   syncBtn: { backgroundColor: colors.primary, borderRadius: 8, paddingVertical: 8, alignItems: 'center', marginTop: 6 },
   syncBtnText: { color: '#fff', fontWeight: '700', fontSize: 12 },
   search: { borderWidth: 1, borderColor: colors.border, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 9, backgroundColor: colors.bgCard, marginBottom: 12, fontSize: 14, color: colors.text },

@@ -215,7 +215,7 @@ const SalesAreaChart = ({ analytics, fallback, range, onRange, cur, onCur }: {
                 height: Math.max(4, (d.total / Math.max(1, ...fallback.map((x) => x.total))) * 70),
                 backgroundColor: colors.primary, borderRadius: 4, width: '60%',
               }} />
-              <Text style={{ fontSize: 9, color: colors.textMuted, marginTop: 4 }}>{d.date.slice(5)}</Text>
+              <Text style={{ fontSize: 10, color: colors.textMuted, marginTop: 4 }}>{d.date.slice(5)}</Text>
             </View>
           ))}
         </View>

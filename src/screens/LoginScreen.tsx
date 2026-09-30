@@ -8,6 +8,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
 import { AuthAPI } from '../api/endpoints';
 import { colors, radius, shadow, card3d, NAVY } from '../config/theme';
+import Icon from '../components/Icon';
 import RegisterScreen from './RegisterScreen';
 
 // ─── LOGIN (paridad visual con la web) ───────────────────────────────────────
@@ -100,7 +101,10 @@ export default function LoginScreen() {
             <View style={[styles.card, card3d]}>
               {error ? (
                 <View style={styles.errorBox}>
-                  <Text style={styles.errorText}>⚠ {error}</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+        <Icon name="alert" size={14} color={colors.danger} />
+        <Text style={styles.errorText}>{error}</Text>
+      </View>
                 </View>
               ) : null}
 
@@ -212,10 +216,10 @@ const styles = StyleSheet.create({
   card: {
     width: '100%', maxWidth: 400,
     backgroundColor: colors.bgCard,
-    borderRadius: 22, padding: 24,
+    borderRadius: 20, padding: 24,
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.6)',
   },
-  errorBox: { backgroundColor: '#FEF2F2', borderRadius: 10, padding: 12, marginBottom: 14, borderWidth: 1, borderColor: 'rgba(220,38,38,0.25)' },
+  errorBox: { backgroundColor: colors.dangerBg, borderRadius: 10, padding: 12, marginBottom: 14, borderWidth: 1, borderColor: 'rgba(220,38,38,0.25)' },
   errorText: { color: colors.danger, fontSize: 13, fontWeight: '600', lineHeight: 18 },
   label: { fontSize: 12, fontWeight: '700', color: colors.textMuted, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6, marginTop: 14 },
   input: {
@@ -233,6 +237,6 @@ const styles = StyleSheet.create({
   linkBtn: { marginTop: 16, alignItems: 'center' },
   linkText: { color: colors.primary, fontWeight: '600', fontSize: 14 },
   okBox: { backgroundColor: colors.successBg, borderRadius: 10, padding: 12, marginBottom: 14, borderWidth: 1, borderColor: 'rgba(16,185,129,0.3)' },
-  okText: { color: '#065F46', fontSize: 13, lineHeight: 18 },
+  okText: { color: colors.successText, fontSize: 13, lineHeight: 18 },
   trialNote: { color: 'rgba(255,255,255,0.55)', fontSize: 12, marginTop: 22, textAlign: 'center' },
 });

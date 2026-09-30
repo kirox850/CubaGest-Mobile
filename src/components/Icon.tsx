@@ -2,22 +2,38 @@
 // Mismos paths SVG que la web: stroke 2, cap/join round. Con react-native-svg
 // (compatible con Expo Go) en lugar de emojis.
 import React from 'react';
-import Svg, { Path, Polyline, Line, Circle, Rect } from 'react-native-svg';
 
+declare const __DEV__: boolean;
+import Svg, { Path, Polyline, Line, Circle, Rect } from 'react-native-svg';
+import { colors } from '../config/theme';
+
+// El union es la LISTA, no una pista: `IconName | string` ensancha la unión
+// hasta `string` y anula el chequeo de tipos, que es justo lo que dejó pasar
+// nueve estados vacíos con un emoji en vez de un icono. Con el union solo, un nombre mal
+// escrito es un error de compilación.
 export type IconName =
   | 'dashboard' | 'inventario' | 'pos' | 'facturacion' | 'contabilidad'
   | 'usuarios' | 'plus' | 'trash' | 'edit' | 'search' | 'logout' | 'alert'
   | 'check' | 'print' | 'eye' | 'close' | 'trend_up' | 'cart' | 'minus'
   | 'x' | 'refresh' | 'cierre' | 'doc' | 'transferencias' | 'auditoria'
-  | 'warehouse';
+  | 'warehouse' | 'cash'
+  // Portados de la web con su path exacto (ver CubaGest-Web/src/components/
+  // shared/Icon.tsx). Los necesita la Configuración y la purga de emoji.
+  | 'arrow_left' | 'bell' | 'building' | 'clipboard' | 'clock'
+  | 'credit_card' | 'gift' | 'link' | 'lock' | 'mail' | 'message'
+  | 'moon' | 'settings' | 'shield' | 'sun' | 'zap';
 
 interface IconProps {
-  name: IconName | string;
+  name: IconName;
   size?: number;
   color?: string;
 }
 
-const Icon = ({ name, size = 18, color = '#64748B' }: IconProps) => {
+const Icon = ({ name, size = 18, color }: IconProps) => {
+  // Sin color explícito se usa el apagado DEL TEMA. Estaba fijo en `#64748B`,
+  // el valor de `--muted` en claro, así que en tema oscuro todos los iconos
+  // que no recibieran color quedaban medio invisibles contra la superficie.
+  const c = color ?? colors.textMuted;
   const common = {
     strokeLinecap: 'round' as const,
     strokeLinejoin: 'round' as const,
@@ -219,7 +235,165 @@ const Icon = ({ name, size = 18, color = '#64748B' }: IconProps) => {
           <Path d="M9 21v-6h6v6" stroke={color} strokeWidth={2} {...common} />
         </Svg>
       );
+    // Caja registradora: la pantalla de entradas y salidas de dinero. No existía
+    // y se reusaba 'contabilidad', que ya está en pantalla a la vez y hace que
+    // el menú no diga nada sobre adónde lleva.
+    case 'cash':
+      return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+          <Rect x="2" y="6" width="20" height="12" rx="2" stroke={color} strokeWidth={2} {...common} />
+          <Path d="M6 10h.01" stroke={color} strokeWidth={2} {...common} />
+          <Circle cx="12" cy="12" r="2.2" stroke={color} strokeWidth={2} {...common} />
+          <Path d="M18 10h.01" stroke={color} strokeWidth={2} {...common} />
+          <Path d="M4 3h16" stroke={color} strokeWidth={2} {...common} />
+        </Svg>
+      );
+
+    // ── Los 16 que faltaban, con el path EXACTO de la web ────────────────
+    // Copiados carácter a carácter de CubaGest-Web/src/components/shared/
+    // Icon.tsx: mismo viewBox, mismo strokeWidth, mismos cap/join. Un icono
+    // dibujado a ojo es un icono que ya no se parece al de la web, que es
+    // justo lo que este archivo existe para evitar.
+    case 'arrow_left':
+      return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+          <Line x1={19} y1={12} x2={5} y2={12} stroke={color} strokeWidth={2} {...common} />
+          <Polyline points="12 19 5 12 12 5" stroke={color} strokeWidth={2} {...common} />
+        </Svg>
+      );
+    case 'bell':
+      return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+          <Path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" stroke={color} strokeWidth={2} {...common} />
+          <Path d="M13.73 21a2 2 0 0 1-3.46 0" stroke={color} strokeWidth={2} {...common} />
+        </Svg>
+      );
+    case 'building':
+      return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+          <Rect x={3} y={3} width={18} height={18} rx={1} stroke={color} strokeWidth={2} {...common} />
+          <Line x1={7} y1={7} x2={7} y2={7} stroke={color} strokeWidth={2} {...common} />
+          <Line x1={12} y1={7} x2={12} y2={7} stroke={color} strokeWidth={2} {...common} />
+          <Line x1={17} y1={7} x2={17} y2={7} stroke={color} strokeWidth={2} {...common} />
+          <Line x1={7} y1={12} x2={7} y2={12} stroke={color} strokeWidth={2} {...common} />
+          <Line x1={12} y1={12} x2={12} y2={12} stroke={color} strokeWidth={2} {...common} />
+          <Line x1={17} y1={12} x2={17} y2={12} stroke={color} strokeWidth={2} {...common} />
+          <Path d="M7 21v-4h4v4m2 0v-7h4v7" stroke={color} strokeWidth={2} {...common} />
+        </Svg>
+      );
+    case 'clipboard':
+      return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+          <Rect x={5} y={4} width={14} height={17} rx={2} stroke={color} strokeWidth={2} {...common} />
+          <Rect x={9} y={2} width={6} height={4} rx={1} stroke={color} strokeWidth={2} {...common} />
+          <Line x1={8} y1={10} x2={16} y2={10} stroke={color} strokeWidth={2} {...common} />
+          <Line x1={8} y1={14} x2={16} y2={14} stroke={color} strokeWidth={2} {...common} />
+          <Line x1={8} y1={18} x2={13} y2={18} stroke={color} strokeWidth={2} {...common} />
+        </Svg>
+      );
+    case 'clock':
+      return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+          <Circle cx={12} cy={12} r={9} stroke={color} strokeWidth={2} {...common} />
+          <Polyline points="12 7 12 12 15 14" stroke={color} strokeWidth={2} {...common} />
+        </Svg>
+      );
+    case 'credit_card':
+      return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+          <Rect x={2} y={5} width={20} height={14} rx={2} stroke={color} strokeWidth={2} {...common} />
+          <Line x1={2} y1={10} x2={22} y2={10} stroke={color} strokeWidth={2} {...common} />
+          <Line x1={6} y1={15} x2={10} y2={15} stroke={color} strokeWidth={2} {...common} />
+        </Svg>
+      );
+    case 'gift':
+      return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+          <Rect x={3} y={8} width={18} height={13} rx={2} stroke={color} strokeWidth={2} {...common} />
+          <Line x1={12} y1={8} x2={12} y2={21} stroke={color} strokeWidth={2} {...common} />
+          <Line x1={3} y1={12} x2={21} y2={12} stroke={color} strokeWidth={2} {...common} />
+          <Path d="M12 8H7.5a2.5 2.5 0 1 1 2.5-2.5C10 7 12 8 12 8z" stroke={color} strokeWidth={2} {...common} />
+          <Path d="M12 8h4.5a2.5 2.5 0 1 0-2.5-2.5C14 7 12 8 12 8z" stroke={color} strokeWidth={2} {...common} />
+        </Svg>
+      );
+    case 'link':
+      return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+          <Path d="M10 13a5 5 0 0 0 7.07.07l2-2a5 5 0 0 0-7.07-7.07l-1.14 1.14" stroke={color} strokeWidth={2} {...common} />
+          <Path d="M14 11a5 5 0 0 0-7.07-.07l-2 2A5 5 0 0 0 12 20l1.14-1.14" stroke={color} strokeWidth={2} {...common} />
+          <Line x1={8} y1={16} x2={16} y2={8} stroke={color} strokeWidth={2} {...common} />
+        </Svg>
+      );
+    case 'lock':
+      return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+          <Rect x={4} y={10} width={16} height={11} rx={2} stroke={color} strokeWidth={2} {...common} />
+          <Path d="M8 10V7a4 4 0 0 1 8 0v3" stroke={color} strokeWidth={2} {...common} />
+        </Svg>
+      );
+    case 'mail':
+      return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+          <Rect x={3} y={5} width={18} height={14} rx={2} stroke={color} strokeWidth={2} {...common} />
+          <Polyline points="3 7 12 13 21 7" stroke={color} strokeWidth={2} {...common} />
+        </Svg>
+      );
+    case 'message':
+      return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+          <Path d="M21 11.5a8.38 8.38 0 0 1-9 8.5 8.5 8.5 0 0 1-5.3-1.85L3 20l1.85-3.7A8.38 8.38 0 0 1 3 11.5a8.5 8.5 0 0 1 17.99 0z" stroke={color} strokeWidth={2} {...common} />
+        </Svg>
+      );
+    case 'moon':
+      return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+          <Path d="M21 12.8A8.5 8.5 0 1 1 11.2 3 6.5 6.5 0 0 0 21 12.8z" stroke={color} strokeWidth={2} {...common} />
+        </Svg>
+      );
+    case 'settings':
+      return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+          <Circle cx={12} cy={12} r={3} stroke={color} strokeWidth={2} {...common} />
+          <Path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" stroke={color} strokeWidth={2} {...common} />
+        </Svg>
+      );
+    case 'shield':
+      return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+          <Path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" stroke={color} strokeWidth={2} {...common} />
+          <Polyline points="9 12 11 14 15 10" stroke={color} strokeWidth={2} {...common} />
+        </Svg>
+      );
+    case 'sun':
+      return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+          <Circle cx={12} cy={12} r={4} stroke={color} strokeWidth={2} {...common} />
+          <Line x1={12} y1={2} x2={12} y2={5} stroke={color} strokeWidth={2} {...common} />
+          <Line x1={12} y1={19} x2={12} y2={22} stroke={color} strokeWidth={2} {...common} />
+          <Line x1={4.93} y1={4.93} x2={7.76} y2={7.76} stroke={color} strokeWidth={2} {...common} />
+          <Line x1={16.24} y1={16.24} x2={19.07} y2={19.07} stroke={color} strokeWidth={2} {...common} />
+          <Line x1={2} y1={12} x2={5} y2={12} stroke={color} strokeWidth={2} {...common} />
+          <Line x1={19} y1={12} x2={22} y2={12} stroke={color} strokeWidth={2} {...common} />
+          <Line x1={4.93} y1={19.07} x2={7.76} y2={16.24} stroke={color} strokeWidth={2} {...common} />
+          <Line x1={16.24} y1={7.76} x2={19.07} y2={4.93} stroke={color} strokeWidth={2} {...common} />
+        </Svg>
+      );
+    case 'zap':
+      return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+          <Polyline points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" stroke={color} strokeWidth={2} {...common} />
+        </Svg>
+      );
     default:
+      // Con el tipado cerrado esto ya no se puede escribir sin error de
+      // compilación, así que llegar aquí significa un dato que llega de
+      //en tiempo de ejecución (un nombre guardado, una API nueva) y no un
+      // descuido. Por eso
+      // avisa en vez de desaparecer en silencio: un icono que no se ve es el
+      // fallo más difícil de detectar de los que hay en una pantalla.
+      if (__DEV__) {
+        console.warn(`[Icon] nombre desconocido: "${name}". Añádelo al union IconName y a su case.`);
+      }
       return null;
   }
 };

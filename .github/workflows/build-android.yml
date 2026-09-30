@@ -28,6 +28,15 @@ jobs:
       - name: Install dependencies (CI)
         run: npm ci
 
+      # Compuertas de calidad: un árbol que no compila o cuyos tests fallan
+      # no produce un APK. Va DESPUÉS de npm ci y ANTES del prebuild: si algo
+      # está roto, se entera aquí en segundos y no tras minutos de Gradle.
+      # (--ci para que jest corra en modo CI: sin watch, un solo pase.)
+      - name: Typecheck and tests (gates)
+        run: |
+          npx tsc --noEmit
+          npx jest --ci --silent
+
       # Genera el proyecto android nativo desde app.json + dependencias de
       # Expo (SDK 57 / RN 0.81), la vía oficial. Sustituye al antiguo
       # "react-native@0.74.5 init" cuya plantilla era incompatible con el JS.
