@@ -245,9 +245,30 @@ export const ClosingAPI = {
 //  - POST /shift/end    → { closed }
 export const ShiftAPI = {
   current: (): Promise<ShiftCurrentResponse> => apiFetch('/shift/current'),
-  start: (locationId: string, baseCash?: Record<string, number>): Promise<{ shift: Shift }> =>
-    apiFetch('/shift/start', { method: 'POST', body: { locationId, baseCash } }),
-  end: (): Promise<{ closed: string }> => apiFetch('/shift/end', { method: 'POST' }),
+  // `items` es el conteo de apertura: sin él, el servidor copia el stock actual y
+  // la caja queda sin verificar. OBLIGATORIO pasar por el conteo, LIBRE de
+  // rellenarlo — se puede aceptar tal cual, y eso es firma, no error.
+  start: (
+    locationId: string,
+    baseCash?: Record<string, number>,
+    items?: { productId: string; contado: number }[],
+  ): Promise<{ shift: Shift }> =>
+    apiFetch('/shift/start', {
+      method: 'POST',
+      body: { locationId, baseCash, items, businessAt: new Date().toISOString() },
+    }),
+  // Terminar turno ES cerrar el periodo: cuenta la caja, la cierra y concilia la
+  // cadena. Es el mismo handler que la pantalla de cierres, no una vía aparte.
+  end: (payload?: {
+    items?: any[];
+    countedCash?: Record<string, number>;
+    countedAt?: string;
+    notes?: string;
+  }): Promise<{ closed: string }> =>
+    apiFetch('/shift/end', {
+      method: 'POST',
+      body: { ...payload, countedAt: payload?.countedAt ?? new Date().toISOString() },
+    }),
   // Solo admin. Un PUT es REEMPLAZO TOTAL del juego de cajas, no un toggle:
   // quitar una caja es quitarla de verdad, no "quedó a medio quitar".
   assignments: (userId: string): Promise<AssignedCaja[]> =>

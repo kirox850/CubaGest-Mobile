@@ -23,9 +23,11 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, Modal, ScrollView, TouchableOpacity, Pressable } from 'react-native';
 import { colors, themeRef, shadow } from '../config/theme';
-import { Btn, Inp } from './UI';
+import { Btn, Inp, showToast } from './UI';
 import Icon from './Icon';
 import { baseCashDe, type FilaMoneda } from '../config/cierreDinero';
+import { ClosingAPI, ProductsAPI } from '../api/endpoints';
+
 import type { AssignedCaja, Shift } from '../types';
 
 export type MonedasBase = FilaMoneda[];
@@ -42,19 +44,62 @@ export default function ShiftSheet({
   /** Falló la llamada al servidor: sin red no se puede abrir turno. */
   offline?: boolean;
   onClose: () => void;
-  onAbrir: (locationId: string, baseCash: Record<string, number>) => Promise<void>;
+  onAbrir: (locationId: string, baseCash: Record<string, number>, items?: { productId: string; contado: number }[]) => Promise<void>;
 }) {
   const [elegida, setElegida] = useState<string | null>(null);
   const [monedas, setMonedas] = useState<MonedasBase>([{ cur: 'CUP', valor: '' }]);
   const [enviando, setEnviando] = useState(false);
 
+  // ── El conteo de apertura ──
+  // Abrir turno ES contar la caja. Antes el servidor copiaba el stock actual y lo
+  // llamaba lectura: el sistema se verificaba a sí mismo y la caja quedaba sin
+  // contar en cada cambio de turno.
+  //
+  // OBLIGATORIO pasar por aquí, LIBRE de rellenarlo: el cajero puede aceptar lo
+  // que ve tal cual y seguir. Eso es firma, no error — si después hay faltante, es
+  // de quien aceptó contar y no contó.
+  //
+  // Si el negocio tiene activa la apertura heredada, el paso se salta.
+  const [paso, setPaso] = useState<'elegir' | 'contar'>('elegir');
+  const [conteo, setConteo] = useState<{ productId: string; productName: string; unit: string; esperado: number; contado: number }[]>([]);
+  const [cadena, setCadena] = useState<any>(null);
+  const [cargandoConteo, setCargandoConteo] = useState(false);
+
   if (!visible) return null;
+
+  /**
+   * Pregunta al servidor el estado de la cadena de esa caja. El "esperado" tiene
+   * que ser el que el backend va a usar de verdad: calcularlo en el teléfono
+   * daría un número que, con ventas sin sincronizar, no coincidiría.
+   */
+  const irAContar = async (locationId: string) => {
+    setCargandoConteo(true);
+    try {
+      const [chain, productos]: any[] = await Promise.all([
+        ClosingAPI.chain(locationId),
+        ProductsAPI.list(),
+      ]);
+      const esp = new Map<string, number>(
+        (chain?.esperado?.items || []).map((x: any) => [String(x.productId), Number(x.diff || 0)]),
+      );
+      setConteo((productos || []).map((p: any) => {
+        const e = esp.get(String(p.id)) ?? 0;
+        return { productId: p.id, productName: p.name, unit: p.unit || 'u', esperado: e, contado: e };
+      }));
+      setCadena(chain);
+      setPaso('contar');
+    } catch (e) {
+      showToast('No se pudo cargar la caja: ' + (e as Error).message, 'error');
+    } finally {
+      setCargandoConteo(false);
+    }
+  };
 
   const empezar = async () => {
     if (!elegida || enviando) return;
     try {
       setEnviando(true);
-      await onAbrir(elegida, baseCashDe(monedas));
+      await onAbrir(elegida, baseCashDe(monedas), conteo.map((r) => ({ productId: r.productId, contado: Number(r.contado) || 0 })));
     } finally {
       setEnviando(false);
     }
@@ -160,12 +205,71 @@ export default function ShiftSheet({
             )}
 
             <View style={{ gap: 8, marginTop: 4 }}>
-              <Btn
-                label={enviando ? 'Abriendo turno…' : 'Comenzar turno'}
-                onPress={empezar}
-                disabled={!elegida || enviando}
-              />
-              <Btn variant="ghost" label="Ahora no" onPress={onClose} />
+              {paso === 'contar' ? (
+                <>
+                  {cadena?.esperado?.faltaEslabon && (
+                    <View style={s.sinCajas}>
+                      <Text style={s.sinCajasTitle}>Falta un eslabón de esta caja</Text>
+                      <Text style={s.sinCajasText}>
+                        {cadena.esperado.eslabonFaltante || 'Falta el cierre anterior de esta caja'}.
+                        {'\n'}Los faltantes que veas PUEDEN ser de un turno anterior, no de este.
+                      </Text>
+                    </View>
+                  )}
+                  <Text style={s.subtitle}>
+                    Cuenta la caja. El esperado es lo que dejó el turno anterior.
+                    Puedes aceptar todo tal cual si está bien: eso también vale.
+                  </Text>
+                  <ScrollView style={{ maxHeight: 260 }} keyboardShouldPersistTaps="handled">
+                    {conteo.map((r) => {
+                      const d = Math.round(((Number(r.contado) || 0) - Number(r.esperado)) * 1000) / 1000;
+                      const cambia = Math.abs(d) > 0.001;
+                      return (
+                        <View key={r.productId} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 7, borderBottomWidth: 1, borderBottomColor: colors.border }}>
+                          <Text style={{ flex: 1, color: colors.text, fontSize: 13 }} numberOfLines={1}>{r.productName}</Text>
+                          <Text style={{ width: 50, textAlign: 'right', color: colors.textMuted, fontSize: 12 }}>{r.esperado}</Text>
+                          <Inp
+                            value={String(r.contado)}
+                            keyboardType="decimal-pad"
+                            onChangeText={(t: string) => setConteo(prev =>
+                              prev.map((x) => (x.productId === r.productId ? { ...x, contado: t === '' ? 0 : Number(t) } : x)),
+                            )}
+                            style={{ width: 82, textAlign: 'right' } as any}
+                          />
+                          <Text style={{ width: 48, textAlign: 'right', fontWeight: '700', fontSize: 12, color: !cambia ? colors.success : (d < 0 ? colors.danger : colors.warning) }}>
+                            {!cambia ? 'OK' : (d < 0 ? `-${Math.abs(d)}` : `+${d}`)}
+                          </Text>
+                        </View>
+                      );
+                    })}
+                    {conteo.length === 0 && (
+                      <Text style={{ color: colors.textMuted, fontSize: 13, textAlign: 'center', paddingVertical: 20 }}>
+                        Esta caja no tiene productos que contar.
+                      </Text>
+                    )}
+                  </ScrollView>
+                  <Btn
+                    label={enviando ? 'Abriendo turno…' : 'Abrir turno con este conteo'}
+                    onPress={empezar}
+                    disabled={!elegida || enviando}
+                  />
+                  <Btn variant="ghost" label="Volver atrás" onPress={() => setPaso('elegir')} />
+                </>
+              ) : (
+                <>
+                  <Btn
+                    label={cargandoConteo ? 'Cargando la caja…' : (cadena?.aperturaHeredada ? 'Comenzar turno' : 'Continuar al conteo')}
+                    onPress={() => elegida && (cadena?.aperturaHeredada ? empezar() : irAContar(elegida))}
+                    disabled={!elegida || enviando || cargandoConteo}
+                  />
+                  {!cadena?.aperturaHeredada && (
+                    <Text style={{ color: colors.textMuted, fontSize: 11, textAlign: 'center' }}>
+                      Después vas a contar la caja. Puedes aceptarla tal cual si está bien.
+                    </Text>
+                  )}
+                  <Btn variant="ghost" label="Ahora no" onPress={onClose} />
+                </>
+              )}
             </View>
           </ScrollView>
         </Pressable>

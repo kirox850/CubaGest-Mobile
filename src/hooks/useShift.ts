@@ -86,8 +86,8 @@ export interface UseShiftValue {
   offline: boolean;
   /** Aviso del servidor. NUNCA se trata como "no hay turno". */
   aviso: string | null;
-  abrirTurno: (locationId: string, baseCash?: Record<string, number>) => Promise<Shift | null>;
-  cerrarTurno: () => Promise<void>;
+  abrirTurno: (locationId: string, baseCash?: Record<string, number>, items?: { productId: string; contado: number }[]) => Promise<Shift | null>;
+  cerrarTurno: (payload?: { items?: any[]; countedCash?: Record<string, number>; notes?: string }) => Promise<void>;
   refresh: () => Promise<void>;
 }
 
@@ -142,10 +142,10 @@ export function useShift(userId: string | undefined): UseShiftValue {
 
   useEffect(() => { void cargar(); }, [cargar, userId]);
 
-  const abrirTurno = useCallback(async (locationId: string, baseCash?: Record<string, number>) => {
+  const abrirTurno = useCallback(async (locationId: string, baseCash?: Record<string, number>, items?: { productId: string; contado: number }[]) => {
     const uid = usuarioRef.current;
     if (!uid) throw new Error('Inicia sesión para abrir turno');
-    const r = await ShiftAPI.start(locationId, baseCash);
+    const r = await ShiftAPI.start(locationId, baseCash, items);
     const nuevo: Shift | null = r?.shift ?? null;
     setShift(nuevo);
     setAviso(null);
@@ -155,9 +155,13 @@ export function useShift(userId: string | undefined): UseShiftValue {
     return nuevo;
   }, [cajas]);
 
-  const cerrarTurno = useCallback(async () => {
+  const cerrarTurno = useCallback(async (payload?: {
+    items?: any[];
+    countedCash?: Record<string, number>;
+    notes?: string;
+  }) => {
     const uid = usuarioRef.current;
-    await ShiftAPI.end();
+    await ShiftAPI.end(payload);
     setShift(null);
     // Las cajas NO se borran al cerrar el turno: siguen siendo las del cajero.
     // Pasarlas como [] vaciaba la lista y dejaba la app sin saber dónde puede

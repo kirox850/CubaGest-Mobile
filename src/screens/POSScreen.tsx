@@ -60,6 +60,7 @@ export default function POSScreen() {
   const [myLocationId, setMyLocationId] = useState('');
   const [myLocationName, setMyLocationName] = useState('');
   const [pidiendoTurno, setPidiendoTurno] = useState(false);
+  const [pidiendoCierre, setPidiendoCierre] = useState(false);
   const [search, setSearch] = useState('');
   const [cart, setCart] = useState<Record<string, number>>({});
   const [payMethod, setPayMethod] = useState('efectivo');
@@ -225,18 +226,21 @@ export default function POSScreen() {
     }
   };
 
-  const terminarTurno = async () => {
-    // Se avisa de lo que pasa con el carrito ANTES de cerrar. El turno es lo
-    // único de esta pantalla que no se puede volver a abrir.
-    if (!(await showConfirm('¿Terminar el turno? Se vaciará el carrito.'))) return;
+  // Terminar el turno ES cerrar el periodo: contar la caja, cerrarla y conciliar la
+  // cadena. Antes este botón llamaba a /shift/end a pelo, que cerraba el turno sin
+  // foto de cierre y dejaba un hueco que el siguiente cajero heredaba como
+  // descuadre propio.
+  const terminarTurno = async () => setPidiendoCierre(true);
+
+  const cerrarYa = async () => {
     try {
-      await cerrarTurno();
+      setPidiendoCierre(false);
       await refreshTurno();
       setCart({});
       load();
     } catch (e) {
       showError((e as Error).message);
-    };
+    }
   };
 
   const filtered = products.filter((p) => {
@@ -422,6 +426,16 @@ export default function POSScreen() {
           lo tenía y el móvil no: el cajero no tenía forma de saber de un vistazo
           dónde estaba cobrando. */}
       {shift && <ShiftBadge shift={shift} onTerminar={terminarTurno} />}
+
+      {shift && (
+        <CerrarTurnoSheet
+          visible={pidiendoCierre}
+          openingReadingId={shift.openingReadingId ?? ''}
+          locationName={shift.locationName}
+          onCerrar={cerrarYa}
+          onCancel={() => setPidiendoCierre(false)}
+        />
+      )}
 
       {/* Aviso del servidor. NUNCA se trata como "no tienes turno": casi siempre
           es una migración sin aplicar, y mandar a un cajero a abrir un turno que
@@ -785,3 +799,4 @@ export const styles = new Proxy({} as ReturnType<typeof createStyles>, {
   },
 });
 
+import CerrarTurnoSheet from '../components/CerrarTurnoSheet';
