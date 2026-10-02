@@ -188,8 +188,26 @@ export const ClosingAPI = {
   // para pintar el detalle nunca verá si el cierre está resuelto.
   detail: (id: string): Promise<Closing> => apiFetch(`/closing/${id}`),
   readings: (): Promise<InventoryReading[]> => apiFetch('/closing/readings'),
-  takeReading: (locationId: string, notes?: string): Promise<InventoryReading> =>
-    apiFetch('/closing/readings', { method: 'POST', body: { locationId, notes } }),
+  // El conteo es lo que hace que esto sea una apertura de verdad. Sin `items`,
+  // el backend copia el stock actual y no se cuenta nada: es el comportamiento
+  // viejo, y se conserva solo para quien no mande conteo.
+  // `businessAt` es la hora en la que se CUENTA, no la de ahora: es la que fija
+  // hasta dónde llega la foto de esta caja.
+  takeReading: (
+    locationId: string,
+    notes?: string,
+    items?: { productId: string; contado: number }[],
+    businessAt?: string,
+  ): Promise<InventoryReading> =>
+    apiFetch('/closing/readings', {
+      method: 'POST',
+      body: { locationId, notes, items, businessAt: businessAt ?? new Date().toISOString() },
+    }),
+  /**
+   * El estado de la cadena de la caja: última foto, si falta el eslabón
+   * anterior, y qué se espera en la apertura siguiente.
+   */
+  chain: (locationId: string): Promise<any> => apiFetch(`/closing/chain/${locationId}`),
   preview: (initialReadingId: string): Promise<ClosingPreview> =>
     apiFetch(`/closing/preview/${initialReadingId}`),
   // `countedCash` y `countedAt` son lo que convierte esto en un cierre de dinero
@@ -287,7 +305,7 @@ export const CashMovementsAPI = {
     ).toString();
     return apiFetch(`/cash-movements${qs ? `?${qs}` : ''}`);
   },
-  create: (body: { locationId: string; type: 'entrada' | 'salida'; amount: number; currency: string; reason?: string }): Promise<CashMovement> =>
+  create: (body: { locationId: string; type: 'entrada' | 'salida'; amount: number; currency: string; reason?: string; businessAt?: string }): Promise<CashMovement> =>
     apiFetch('/cash-movements', { method: 'POST', body: body as unknown as Record<string, unknown> }),
   decide: (id: string, decision: 'aprobar' | 'rechazar', note?: string): Promise<{ id: string; status: string }> =>
     apiFetch(`/cash-movements/${id}/decide`, { method: 'POST', body: { decision, note: note || undefined } }),

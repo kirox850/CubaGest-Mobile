@@ -1,7 +1,7 @@
 import React, { useCallback, useState } from 'react';
 import { View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, Modal, ScrollView } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
-import { ClosingAPI, LocationsAPI } from '../api/endpoints';
+import { ClosingAPI, LocationsAPI, ProductsAPI } from '../api/endpoints';
 import { useAuth } from '../context/AuthContext';
 import { colors, themeRef } from '../config/theme';
 import { Badge, EmptyState, ErrorBanner, Skeleton, Btn, PageHeader, showToast } from '../components/UI';
@@ -174,13 +174,54 @@ export default function CierreCajaScreen() {
     }
   };
 
+  // Conteo de apertura: una fila por producto con lo esperado (la última foto de
+  // la caja, según el servidor) y lo que el cajero cuenta. El esperado NO se
+  // calcula en el teléfono: si las dos pantallas dijeran cosas distintas, el
+  // conteo se compararía contra un número que el backend no usa.
+  const [countRows, setCountRows] = useState<{ productId: string; productName: string; unit: string; esperado: number; contado: number }[]>([]);
+  const [chainInfo, setChainInfo] = useState<any>(null);
+
+  const openReading = async (locationId: string) => {
+    try {
+      const [chain, productos] = await Promise.all([
+        ClosingAPI.chain(locationId),
+        ProductsAPI.list(),
+      ]);
+      const esperadoPorProducto = new Map<string, number>(
+        ((chain as any)?.esperado?.items || []).map((x: any) => [String(x.productId), Number(x.diff || 0)]),
+      );
+      setCountRows((productos || []).map((p: any) => ({
+        productId: p.id,
+        productName: p.name,
+        unit: p.unit || 'u',
+        esperado: esperadoPorProducto.get(String(p.id)) ?? 0,
+        contado: esperadoPorProducto.get(String(p.id)) ?? 0,
+      })));
+      setChainInfo(chain);
+      setConfirmReading(true);
+    } catch (e) {
+      showError((e as Error).message);
+    }
+  };
+
   const takeReading = async () => {
     if (!readingLocationId) return showError('Selecciona la ubicación');
     try {
       setSaving(true);
-      await ClosingAPI.takeReading(readingLocationId, 'Lectura de apertura manual');
-      showToast('Lectura de inventario tomada', 'success');
+      await ClosingAPI.takeReading(
+        readingLocationId,
+        'Conteo de apertura',
+        countRows.map((r) => ({ productId: r.productId, contado: Number(r.contado) || 0 })),
+        new Date().toISOString(),
+      );
+      showToast(
+        chainInfo?.aperturaHeredada
+          ? 'Apertura registrada heredando el cierre anterior'
+          : `Conteo guardado (${countRows.length} productos)`,
+        'success',
+      );
       setConfirmReading(false);
+      setChainInfo(null);
     } catch (e) {
       showError((e as Error).message);
     } finally {
@@ -197,7 +238,7 @@ export default function CierreCajaScreen() {
           <PageHeader title="Cierre de Caja" subtitle="Conciliación de ventas, stock e ingresos" />
           <View style={{ flexDirection: 'row', gap: 10, flexWrap: 'wrap' }}>
             {isAdmin && (
-              <Btn variant="secondary" icon="refresh" label="Lectura de apertura" onPress={() => setConfirmReading(true)} />
+              <Btn variant="secondary" icon="refresh" label="Lectura de apertura" onPress={() => openReading(readingLocationId)} />
             )}
             <Btn icon="check" label="Iniciar cierre" onPress={startClosing} />
           </View>
@@ -292,7 +333,7 @@ export default function CierreCajaScreen() {
         <Modal visible={confirmReading} transparent animationType="fade" onRequestClose={() => setConfirmReading(false)}>
           <View style={styles.modalBg}>
             <View style={styles.modalCard}>
-              <Text style={styles.modalTitle}>Tomar lectura de inventario</Text>
+              <Text style={styles.modalTitle}>Contar la caja para abrir el turno</Text>
               {locations.length > 1 ? (
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
                   <View style={{ flexDirection: 'row', gap: 6 }}>
@@ -300,7 +341,10 @@ export default function CierreCajaScreen() {
                       <TouchableOpacity
                         key={l.id}
                         style={[styles.chip, readingLocationId === l.id && styles.chipActive]}
-                        onPress={() => setReadingLocationId(l.id)}
+                        onPress={() => {
+                          setReadingLocationId(l.id);
+                          openReading(l.id);
+                        }}
                       >
                         <Text style={[styles.chipText, readingLocationId === l.id && { color: '#fff' }]}>{l.name}</Text>
                       </TouchableOpacity>
@@ -308,24 +352,79 @@ export default function CierreCajaScreen() {
                   </View>
                 </ScrollView>
               ) : null}
-              <View style={styles.warnBox}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-            <Icon name="alert" size={15} color={colors.warning} />
-            <Text style={styles.warnTitle}>Antes de continuar</Text>
-          </View>
-                <Text style={styles.warnText}>
-                  • Registrará el stock actual de esa ubicación como punto de partida del próximo cierre.{'\n'}
-                  • Si hay ventas sin cerrar quedarán FUERA del período.{'\n'}
-                  • Hazlo solo al abrir el negocio o al cambiar de turno.{'\n'}
-                  • No se puede deshacer.
-                </Text>
-              </View>
+
+              {/* El eslabón que falta. Sin esto, un descuadre que en realidad es de
+                  un turno anterior aparece como si fuera de este y el cajero carga
+                  con la culpa de otro. */}
+              {chainInfo?.esperado?.faltaEslabon && (
+                <View style={[styles.warnBox, { marginBottom: 10 }]}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Icon name="alert" size={15} color={colors.warning} />
+                    <Text style={styles.warnTitle}>Falta un eslabón de esta caja</Text>
+                  </View>
+                  <Text style={styles.warnText}>
+                    {chainInfo.esperado.eslabonFaltante || 'Falta el cierre anterior de esta caja'}.
+                    {'\n'}Los faltantes que veas PUEDEN ser de un turno anterior, no de este.
+                  </Text>
+                </View>
+              )}
+
+              {chainInfo?.aperturaHeredada ? (
+                <View style={[styles.warnBox, { marginBottom: 10 }]}>
+                  <Text style={styles.warnText}>
+                    Este negocio tiene activada la opción de NO contar al abrir: la apertura heredará el
+                    cierre anterior y la caja no se verificará en este cambio de turno.
+                  </Text>
+                </View>
+              ) : (
+                <View style={[styles.warnBox, { marginBottom: 10 }]}>
+                  <Text style={styles.warnTitle}>Instrucción</Text>
+                  <Text style={styles.warnText}>
+                    Cuenta cada producto y escribe la cantidad. El esperado es lo que dejó el turno
+                    anterior, así que ves enseguida si no cuadra. Lo que no cambies se queda igual.
+                  </Text>
+                </View>
+              )}
+
+              <ScrollView style={{ maxHeight: 300 }} keyboardShouldPersistTaps="handled">
+                {countRows.map((r) => {
+                  const d = Math.round(((Number(r.contado) || 0) - Number(r.esperado)) * 1000) / 1000;
+                  const cambia = Math.abs(d) > 0.001;
+                  return (
+                    <View key={r.productId} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 7, borderBottomWidth: 1, borderBottomColor: colors.border }}>
+                      <Text style={{ flex: 1, color: colors.text, fontSize: 13 }} numberOfLines={1}>{r.productName}</Text>
+                      <Text style={{ width: 54, textAlign: 'right', color: colors.textMuted, fontSize: 12 }}>{r.esperado}</Text>
+                      <TextInput
+                        style={{
+                          width: 82, paddingVertical: 5, paddingHorizontal: 8, textAlign: 'right',
+                          borderWidth: 1, borderColor: colors.border, borderRadius: 7,
+                          color: colors.text, fontSize: 13, backgroundColor: colors.inputBg,
+                        }}
+                        keyboardType="decimal-pad"
+                        value={String(r.contado)}
+                        onChangeText={(t) => setCountRows((prev) =>
+                          prev.map((x) => (x.productId === r.productId ? { ...x, contado: t === '' ? 0 : Number(t) } : x)),
+                        )}
+                      />
+                      <Text style={{ width: 52, textAlign: 'right', fontWeight: '700', fontSize: 12, color: !cambia ? colors.success : (d < 0 ? colors.danger : colors.warning) }}>
+                        {!cambia ? 'OK' : (d < 0 ? `-${Math.abs(d)}` : `+${d}`)}
+                      </Text>
+                    </View>
+                  );
+                })}
+                {countRows.length === 0 && (
+                  <Text style={{ color: colors.textMuted, fontSize: 13, textAlign: 'center', paddingVertical: 20 }}>
+                    Esta caja no tiene productos que contar.
+                  </Text>
+                )}
+              </ScrollView>
+
               <View style={styles.modalActions}>
                 <TouchableOpacity style={styles.cancelBtn} onPress={() => setConfirmReading(false)}>
                   <Text style={{ color: colors.textMuted }}>Cancelar</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={[styles.saveBtn, saving && { opacity: 0.6 }]} onPress={takeReading} disabled={saving}>
-                  <Text style={{ color: '#fff', fontWeight: '700' }}>{saving ? 'Tomando...' : 'Tomar lectura'}</Text>
+                  <Text style={{ color: '#fff', fontWeight: '700' }}>{saving ? 'Guardando...' : 'Guardar conteo y abrir'}</Text>
                 </TouchableOpacity>
               </View>
             </View>

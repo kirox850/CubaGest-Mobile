@@ -134,6 +134,11 @@ export default function MovimientosDineroScreen() {
         amount: Number(String(monto).replace(',', '.')),
         currency: moneda,
         reason: tipo === 'salida' ? motivo.trim() : motivo.trim() || undefined,
+        // CUÁNDO salió el dinero de verdad, no cuándo se registró. Un retiro hecho
+        // sin conexión se sube horas o días después; sin esto se contaría en el
+        // periodo equivocado y la apertura siguiente saltaría un descuadre que no
+        // existe.
+        businessAt: new Date().toISOString(),
       });
       showToast(tipo === 'salida' ? 'Salida registrada. Queda pendiente de aprobación.' : 'Entrada registrada.', 'success');
       setMonto('');
