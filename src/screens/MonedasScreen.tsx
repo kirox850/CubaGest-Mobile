@@ -1,6 +1,6 @@
 import React, { useCallback, useState } from 'react';
+import { RecargaAlMontar, RecargaAlEnfocar } from '../components/Recarga';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Switch } from 'react-native';
-import { useFocusEffect } from '@react-navigation/native';
 import { SettingsAPI } from '../api/endpoints';
 import { colors, themeRef } from '../config/theme';
 import { ErrorBanner, Skeleton, showToast } from '../components/UI';
@@ -84,7 +84,9 @@ export default function MonedasScreen({ embedded = false }: { embedded?: boolean
     }
   }, []);
 
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  // Ver components/Recarga.tsx: la recarga se delega a un hijo, porque
+  // `useFocusEffect` exige un NavigationContainer encima y embebida en
+  // Configuración no lo hay. Por qué un hijo y no un `if` está en ese archivo.
 
   const toggleCurrency = (m: string) => {
     if (m === 'CUP') return; // moneda base, siempre activa
@@ -113,8 +115,13 @@ export default function MonedasScreen({ embedded = false }: { embedded?: boolean
     }
   };
 
+
   return (
     <ScrollView style={styles.wrap} contentContainerStyle={{ padding: 12, paddingBottom: 32 }}>
+      {embedded
+        ? <RecargaAlMontar fn={load} />
+        : <RecargaAlEnfocar fn={load} />
+      }
       <ErrorBanner message={error} />
 
 {!embedded && <Text style={styles.title}>Monedas del negocio</Text>}

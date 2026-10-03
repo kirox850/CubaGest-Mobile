@@ -1,7 +1,7 @@
 import React, { useCallback, useState } from 'react';
+import { RecargaAlMontar, RecargaAlEnfocar } from '../components/Recarga';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useFocusEffect } from '@react-navigation/native';
 import { DiscountsAPI, LocationsAPI } from '../api/endpoints';
 import { colors, radius, shadow, themeRef } from '../config/theme';
 import { Badge, EmptyState, ErrorBanner, SectionHeader, PageHeader, SkeletonRows } from '../components/UI';
@@ -38,7 +38,9 @@ export default function DiscountsScreen({ embedded = false }: { embedded?: boole
       setError((e as Error).message);
     } finally { setLoading(false); }
   }, []);
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  // Ver components/Recarga.tsx: la recarga se delega a un hijo, porque
+  // `useFocusEffect` exige un NavigationContainer encima y embebida en
+  // Configuración no lo hay. Por qué un hijo y no un `if` está en ese archivo.
 
   const create = async () => {
     if (!form.name || !form.value) { setError('Nombre y valor son requeridos'); return; }
@@ -86,6 +88,11 @@ export default function DiscountsScreen({ embedded = false }: { embedded?: boole
     }));
   };
 
+
+    {embedded
+      ? <RecargaAlMontar fn={load} />
+      : <RecargaAlEnfocar fn={load} />
+    }
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
       <ScrollView

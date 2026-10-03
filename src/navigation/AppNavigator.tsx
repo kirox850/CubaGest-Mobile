@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { TouchableOpacity, Text, View, Image, StyleSheet, Modal, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NavigationContainer, DefaultTheme, DarkTheme } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { GrupoScreen, visiblesPara } from '../screens/ConfigGrupo';
 import { useAuth } from '../context/AuthContext';
 import { useSync } from '../context/SyncContext';
 import { useTheme } from '../context/ThemeContext';
@@ -11,7 +12,6 @@ import { colors, shadow, NAVY, themeRef } from '../config/theme';
 import { PRIVACY_POLICY_MD, TERMS_MD } from '../config/legalContent';
 import type { User } from '../types';
 import PlanModal from '../components/PlanModal';
-import ConfiguracionScreen, { type TabId } from '../screens/ConfiguracionScreen';
 import { DialogHost, showConfirm } from '../components/dialogs';
 import { ToastHost } from '../components/UI';
 import LegalModal from '../components/LegalModal';
@@ -34,6 +34,31 @@ const Tab = createBottomTabNavigator();
 // Los módulos usuarios/auditoria/monedas/descuentos NO van en la barra: en la
 // web se abren desde el menú de perfil y aquí se replican igual (screens
 // ocultas a las que el menú navega).
+// Qué se queda en la barra y en qué orden. Un admin tiene los 7 módulos y 7
+// iconos en una barra de 64px: se leen regular, y sobre todo NO se distinguen
+// entre sí. Cinco es el número en el que cada uno todavía se reconoce de un
+// vistazo, que es justo lo que hace una barra.
+//
+// El orden NO es el de NAV_ITEMS: es por frecuencia de uso. Punto de Venta es la
+// acción del negocio y va segundo solo porque Dashboard es la puerta de entrada.
+// El resto que sobre no se pierde — pasa al menú de perfil — pero hay que abrir
+// un nivel más para llegar, que es el precio de que los cinco que sí están se
+// puedan leer sin effort.
+// El `name` de una pantalla de grupo tiene que ser único —es por donde navega el
+// menú—, así que se construye aquí y no se reusa el label, que es texto para el
+// usuario y podría repetirse entre grupos.
+const GRUPO_NOMBRE = (id: string) => `config:${id}`;
+
+// Qué iconos usa cada grupo. Vive con los grupos y no aquí para que añadir uno sea
+// tocar un sitio, no dos.
+const ICONO_GRUPO: Record<string, IconName> = {
+  caja: 'pos', monedas: 'contabilidad', descuentos: 'gift',
+  acceso: 'usuarios', plan: 'facturacion',
+};
+
+const PREFERIDAS_BARRA = ['dashboard', 'pos', 'inventario', 'cierre', 'facturacion'];
+const MAX_TABS = PREFERIDAS_BARRA.length;
+
 const NAV_ITEMS: { key: string; label: string; icon: IconName; component: React.ComponentType<any> }[] = [
   { key: 'dashboard',    label: 'Dashboard',      icon: 'dashboard',    component: DashboardScreen },
   { key: 'inventario',   label: 'Inventario',     icon: 'inventario',   component: InventarioScreen },
@@ -49,12 +74,15 @@ const MENU_SCREENS: { key: string; label: string; icon: IconName; component: Rea
   { key: 'movimientos', label: 'Entradas y Salidas', icon: 'cash', component: MovimientosDineroScreen },
 ];
 
-function HeaderRight({ navigation, onOpenPlan, onOpenLegal, onOpenTour, onOpenModule }: {
+function HeaderRight({ navigation, onOpenPlan, onOpenLegal, onOpenTour, onOpenModule, desbordados }: {
   navigation: any;
   onOpenPlan: () => void;
   onOpenLegal: (doc: 'privacy' | 'terms') => void;
   onOpenTour: () => void;
   onOpenModule: (key: string) => void;
+  // Los módulos que no cabían en la barra. Vienen como prop y no se filtran aquí
+  // porque el corte depende de MAX_TABS, que solo conoce el navigator.
+  desbordados: { key: string; label: string; icon: IconName }[];
 }) {
   const { user, logout, online } = useAuth();
   const { mode, toggle: toggleTheme } = useTheme();
@@ -126,6 +154,13 @@ function HeaderRight({ navigation, onOpenPlan, onOpenLegal, onOpenTour, onOpenMo
                 distintas a las que había que aprender una a una.
                 La pestaña de arranque se pasa para no obligar a elegir dos veces. */}
             <Item icon="settings" label="Configuración" onPress={() => onOpenModule('configuracion')} />
+            {/* Los módulos que se quedaron fuera de la barra. Van aquí arriba,
+                justo después de Configuración y antes de Entradas y Salidas: son
+                módulos de trabajo, y dejarlos debajo del tour y del modo oscuro
+                los escondería entre los ajustes. */}
+            {desbordados.map(t => (
+              <Item key={t.key} icon={t.icon} label={t.label} onPress={() => onOpenModule(t.key)} />
+            ))}
             {(perms.includes('cierre') || perms.includes('contabilidad')) && (
               <Item icon="cash" label="Entradas y Salidas" onPress={() => onOpenModule('movimientos')} />
             )}
@@ -189,12 +224,56 @@ export default function AppNavigator() {
   // producción justo cuando se navega tras un cambio de rol.
   const [configOpen, setConfigOpen] = useState(false);
   // `null` = que Configuración abra en su primera pestaña visible para este rol.
-  const [configTab, setConfigTab] = useState<TabId | null>(null);
+  // Qué grupo de Configuración está abierto. Vive aquí y no dentro de
+  // ConfiguraciónScreen porque ahora es la BARRA la que navega entre grupos: quien
+  // necesita saber cuál es el activo es el navegador, no la pantalla.
+  const [configTab, setConfigTab] = useState<string | null>(null);
+  // `AppNavigator` está FUERA del NavigationContainer que él mismo monta, así que
+  // no puede usar `useNavigation`. Se guarda la referencia que llega por
+  // screenOptions para poder saltar a un grupo concreto al entrar.
+  const navRef = useRef<any>(null);
+  const gruposConfig = visiblesPara(user?.role, perms);
   const [legalDoc, setLegalDoc] = useState<'privacy' | 'terms' | null>(null);
   const [tourOpen, setTourOpen] = useState(false);
 
   // Barra inferior: solo los 7 nav items de la web filtrados por permisos.
-  const tabs = NAV_ITEMS.filter(n => perms.includes(n.key));
+  const permitidos = NAV_ITEMS.filter(n => perms.includes(n.key));
+  // El sort de JS es estable: dentro de cada grupo se conserva el orden de
+  // NAV_ITEMS, así que cambiar PREFERIDAS_BARRA no reordena lo que no ha tocado.
+  const tabs = permitidos
+    .slice()
+    .sort((a, b) => {
+      const pa = PREFERIDAS_BARRA.indexOf(a.key);
+      const pb = PREFERIDAS_BARRA.indexOf(b.key);
+      return (pa === -1 ? MAX_TABS : pa) - (pb === -1 ? MAX_TABS : pb);
+    })
+    .slice(0, MAX_TABS);
+  // Los que se quedaron fuera de la barra, en el MISMO orden, y van al menú.
+  const desbordados = permitidos.filter(n => !tabs.includes(n));
+
+  // ── La misma barra, dos contenidos ─────────────────────────────────────
+  //
+  // Configuración ya no es un modal: es otro MODO del mismo navegador. En vez de
+  // dos barras pegadas, hay una que se vacía y se rellena. Estas tres funciones
+  // son las que deciden qué rutas se ven en cada modo.
+  const esGrupo = (name: string) => name.startsWith('config:');
+  const esModulo = (name: string) =>
+    tabs.some(t => t.label === name) || desbordados.some(t => t.label === name);
+  const visibleEnBarra = (name: string) => configOpen ? esGrupo(name) : esModulo(name);
+
+  /**
+   * Entra en Configuración, opcionalmente abriendo un grupo concreto.
+   *
+   * No basta con poner `configOpen`: en ese momento la pantalla actual es un
+   * módulo, y en modo configuración los módulos quedan ocultos. Sin saltar a un
+   * grupo a propósito se acabaría mirando el último módulo con la barra de
+   * ajustes encima.
+   */
+  const abrirConfig = (grupoId?: string | null) => {
+    const destino = grupoId ? gruposConfig.find(g => g.id === grupoId) : gruposConfig[0];
+    setConfigOpen(true);
+    if (destino) navRef.current?.navigate(GRUPO_NOMBRE(destino.id));
+  };
   // El gate de cada pantalla va POR PERMISO, no por rol, cuando lo que
   // protege el backend es un módulo. `GET /cash-movements` es
   // `requireAnyModule("cierre", "pos", "contabilidad")` (cashMovements.ts:46), y
@@ -232,12 +311,6 @@ export default function AppNavigator() {
 
   return (
     <View style={{ flex: 1 }}>
-      {trialInfo && (
-        <SafeAreaView edges={['top']} style={{ backgroundColor: NAVY }}>
-          <TrialBanner info={trialInfo} onPress={() => { setConfigTab('plan'); setConfigOpen(true); }} />
-        </SafeAreaView>
-      )}
-
       {/* key={version}: al cambiar el tema re-monta el navigator con los
           estilos nuevos. El tema SIEMPRE extiende DefaultTheme/DarkTheme:
           la v7 exige el campo fonts (sin él crashea el HeaderTitle). */}
@@ -255,29 +328,59 @@ export default function AppNavigator() {
         },
       }}>
         <Tab.Navigator
-          screenOptions={({ navigation, route }) => ({
+          screenOptions={({ navigation, route }) => {
+            navRef.current = navigation;
+            return ({
             headerStyle: { backgroundColor: NAVY, ...shadow.sm },
-            // Header navy de marca con logo — idéntico al top header de la web
-            headerTitle: () => (
-              <View style={s.brandRow}>
-                <Image source={require('../../assets/images/icon.png')} style={s.brandLogo} />
-                <Text style={s.brandName}>CubaGest</Text>
-              </View>
+            // ── CABECERA ÚNICA: marca arriba, banner debajo ─────────────────
+            //
+            // Antes eran dos cosas apiladas: el TrialBanner dentro de un
+            // SafeAreaView FUERA del NavigationContainer, y el header de React
+            // Navigation debajo. Cada uno aplicaba su propio margen de seguridad,
+            // así que el notch del iphone se contaba DOS veces y la marca quedaba
+            // empujada muy abajo, casi fuera de pantalla.
+            //
+            // Un solo header con UN SafeAreaView lo arregla, y de paso deja el
+            // orden que tiene sentido: primero la marca y el perfil — donde está
+            // el botón de cerrar sesión — y debajo el aviso de la prueba, que es
+            // información y no navegación.
+            header: () => (
+              <SafeAreaView edges={['top']} style={{ backgroundColor: NAVY, ...shadow.sm }}>
+                <View style={s.brandRow}>
+                  {configOpen ? (
+                    // Chevron ‹ para volver a los módulos. Va a la IZQUIERDA
+                    // porque ahí está el logo siempre: se sustituye en el sitio en
+                    // que estaba, no se añade una pieza más.
+                    <TouchableOpacity onPress={() => setConfigOpen(false)}
+                      hitSlop={12} style={s.back}>
+                      <Icon name="arrow_left" size={22} color="#ffffff" />
+                    </TouchableOpacity>
+                  ) : (
+                    <Image source={require('../../assets/images/icon.png')} style={s.brandLogo} />
+                  )}
+                  <Text style={s.brandName}>{configOpen ? 'Configuración' : 'CubaGest'}</Text>
+                  <View style={{ flex: 1 }} />
+                  <HeaderRight
+                    navigation={navigation}
+                    desbordados={desbordados}
+                    onOpenPlan={() => abrirConfig('plan')}
+                    onOpenLegal={(doc) => setLegalDoc(doc)}
+                    onOpenTour={() => setTourOpen(true)}
+                    onOpenModule={(key) => {
+                      if (key === 'configuracion') { abrirConfig(); return; }
+                      // La lista completa, no solo MENU_SCREENS: los módulos que se
+                      // quedaron fuera de la barra también son NAV_ITEMS, y mirando
+                      // una sola el menú los deja pulsando y sin pasar nada.
+                      const destino = [...NAV_ITEMS, ...MENU_SCREENS].find(t => t.key === key);
+                      if (destino) navigation.navigate(destino.label);
+                    }}
+                  />
+                </View>
+                {trialInfo && (
+                  <TrialBanner info={trialInfo} onPress={() => abrirConfig('plan')} />
+                )}
+              </SafeAreaView>
             ),
-            headerRight: () => (
-              <HeaderRight
-                navigation={navigation}
-                onOpenPlan={() => { setConfigTab('plan'); setConfigOpen(true); }}
-                onOpenLegal={(doc) => setLegalDoc(doc)}
-                onOpenTour={() => setTourOpen(true)}
-                onOpenModule={(key) => {
-                  if (key === 'configuracion') { setConfigTab(null); setConfigOpen(true); return; }
-                  const destino = MENU_SCREENS.find(t => t.key === key);
-                  if (destino) navigation.navigate(destino.label);
-                }}
-              />
-            ),
-            headerTintColor: '#ffffff',
             tabBarActiveTintColor: colors.primary,
             tabBarInactiveTintColor: colors.textMuted,
             // Labels compactos + tab bar más alta: los 7 items de la web caben
@@ -285,7 +388,9 @@ export default function AppNavigator() {
             // largos tipo "Punto de Venta").
             // 9 era ilegible en un teléfono. 10 es el mínimo de la escala (`type.2xs`): por
             // debajo, un usuario tiene que agrandar la pantalla para leer dónde está.
-            tabBarLabelStyle: { fontSize: 10, fontWeight: '500', marginBottom: 3 },
+            // `textAlign: center` sin lo cual la etiqueta se pegaba al borde
+            // izquierdo de su casilla en vez de quedar centrada bajo el icono.
+            tabBarLabelStyle: { fontSize: 10, fontWeight: '500', marginBottom: 3, textAlign: 'center' },
             tabBarStyle: {
               backgroundColor: colors.bgCard,
               borderTopColor: colors.border,
@@ -295,29 +400,83 @@ export default function AppNavigator() {
               paddingBottom: 6,
               ...shadow.sm,
             },
-            tabBarItemStyle: { paddingVertical: 2, justifyContent: 'center' },
+            // Nada de `flex` aquí: React Navigation YA reparte el ancho solo
+            // (`bottomItem` es `flex: 1`). Forzarlo otra vez era ruido, y el
+            // `flex: 1` que se coló en `tabBarIconStyle` estiraba el icono
+            // verticalmente y empujaba la etiqueta hacia abajo.
+            // ── La MISMA barra, dos contenidos ─────────────────────────────
+            //
+            // Configuración ya no es un modal: es otro MODO del mismo navegador,
+            // así que en vez de dos barras pegadas hay una que se vacía y se
+            // rellena. Estas dos piezas son necesarias por el mismo motivo que en
+            // las pantallas ocultas: `tabBarButton: () => null` quita lo que se
+            // DIBUJA, pero el View de fuera conserva `flex: 1` y `display:
+            // 'none'` es lo que saca la casilla de verdad.
+            tabBarButton: visibleEnBarra(route.name) ? undefined : () => null,
+            tabBarItemStyle: visibleEnBarra(route.name)
+              ? { paddingVertical: 2, justifyContent: 'center' }
+              : { display: 'none' },
+            tabBarLabel: esGrupo(route.name)
+              ? gruposConfig.find(g => GRUPO_NOMBRE(g.id) === route.name)?.label || route.name
+              : route.name,
             // Icono SVG real por tab (mismo Icon que la web) + puntito activo
             tabBarIcon: ({ focused }: { focused: boolean }) => {
               const item = [...NAV_ITEMS, ...MENU_SCREENS].find(t => t.label === route.name);
+              // En Configuración el icono sale del grupo, no del módulo: el
+              // `route.name` de un grupo es `config:<id>` y no está en NAV_ITEMS.
+              const grupo = esGrupo(route.name)
+                ? gruposConfig.find(g => GRUPO_NOMBRE(g.id) === route.name)
+                : undefined;
               return (
                 <View style={s.tabIcon}>
-                  <Icon name={item?.icon || 'dashboard'} size={21} color={focused ? colors.primary : colors.textMuted} />
+                  <Icon name={grupo ? ICONO_GRUPO[grupo.id] : (item?.icon || 'dashboard')} size={21} color={focused ? colors.primary : colors.textMuted} />
                   {focused && <View style={s.tabDot} />}
                 </View>
               );
             },
-          })}
+          });
+        }}
         >
           {tabs.map(t => (
             <Tab.Screen key={t.key} name={t.label} component={t.component} />
           ))}
+          {/* Los grupos de Configuración son pantallas del MISMO navegador y no un
+              modal aparte. Así la barra de abajo puede ser una cosa u otra según el
+              modo, sin que haya dos pilas de navegación peleándose. */}
+          {gruposConfig.map(g => (
+            <Tab.Screen
+              key={`grupo-${g.id}`}
+              name={GRUPO_NOMBRE(g.id)}
+              component={GrupoScreen}
+              initialParams={{ grupo: g }}
+            />
+          ))}
           {/* Screens del menú de perfil: registradas sin botón en la tab bar */}
+          {/* Los que se salieron de la barra también necesitan registro, sin
+              botón: si no, el menú navega a un nombre que el navigator no conoce.
+
+              OJO con el `display: 'none'`, que no es opcional. React Navigation
+              envuelve cada pestaña en un View con `flex: 1`, y ese View es el
+              que lleva `tabBarItemStyle`. Poner solo `tabBarButton: () => null`
+              vacía lo que se DIBUJA pero no quita la casilla: la casilla sigue
+              ocupando su tercio de ancho sin pintar nada. Con 9 rutas y 5
+              visibles, 4 casillas fantasma se comían el 44% de la barra y los
+              cinco iconos que sí se veían quedaban apretados a la izquierda con
+              media pantalla vacía a la derecha. Por eso van las dos cosas. */}
+          {desbordados.map(t => (
+            <Tab.Screen
+              key={`desbordado-${t.key}`}
+              name={t.label}
+              component={t.component}
+              options={{ tabBarButton: () => null, tabBarItemStyle: { display: 'none' } }}
+            />
+          ))}
           {menuScreens.map(t => (
             <Tab.Screen
               key={t.key}
               name={t.label}
               component={t.component}
-              options={{ tabBarButton: () => null }}
+              options={{ tabBarButton: () => null, tabBarItemStyle: { display: 'none' } }}
             />
           ))}
         </Tab.Navigator>
@@ -329,11 +488,6 @@ export default function AppNavigator() {
       <ToastHost />
       <DialogHost />
 
-      <ConfiguracionScreen
-        visible={configOpen}
-        onClose={() => setConfigOpen(false)}
-        initialTab={configTab || undefined}
-      />
       <WelcomeTour forceOpen={tourOpen} onClose={() => setTourOpen(false)} />
       <LegalModal
         visible={legalDoc === 'privacy'}
@@ -353,7 +507,12 @@ export default function AppNavigator() {
 
 const createStyles = () => StyleSheet.create({
   headerRight: { flexDirection: 'row', alignItems: 'center', gap: 8, marginRight: 14 },
-  brandRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  // `paddingHorizontal` separa el logo del borde izquierdo y el icono de perfil
+  // del derecho: sin él ambos quedaban pegados al canto de la pantalla. El
+  // `paddingBottom` es el hueco que separa la fila del banner de prueba, que va
+  // justo debajo y se le pegaba al icono.
+  brandRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingBottom: 8 },
+  back: { padding: 2, marginLeft: -2 },
   brandLogo: { width: 32, height: 32, borderRadius: 8 },
   brandName: { color: '#ffffff', fontWeight: '800', fontSize: 15 },
 

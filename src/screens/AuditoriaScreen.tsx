@@ -1,8 +1,8 @@
 import React, { useCallback, useState } from 'react';
+import { RecargaAlMontar, RecargaAlEnfocar } from '../components/Recarga';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity, ScrollView,
 } from 'react-native';
-import { useFocusEffect } from '@react-navigation/native';
 import { AuditAPI } from '../api/endpoints';
 import { colors, themeRef } from '../config/theme';
 import { Badge, EmptyState, ErrorBanner, SkeletonRows } from '../components/UI';
@@ -76,7 +76,9 @@ export default function AuditoriaScreen({ embedded = false }: { embedded?: boole
     }
   }, [entity]);
 
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  // Ver components/Recarga.tsx: la recarga se delega a un hijo, porque
+  // `useFocusEffect` exige un NavigationContainer encima y embebida en
+  // Configuración no lo hay. Por qué un hijo y no un `if` está en ese archivo.
 
   const detailText = (d: unknown): string => {
     if (!d) return '';
@@ -95,8 +97,13 @@ export default function AuditoriaScreen({ embedded = false }: { embedded?: boole
     }
   };
 
+
   return (
     <View style={styles.wrap}>
+      {embedded
+        ? <RecargaAlMontar fn={load} />
+        : <RecargaAlEnfocar fn={load} />
+      }
       {!embedded && <Text style={styles.title}>Auditoría</Text>}
       <Text style={styles.subtitle}>Registro de actividad de la empresa</Text>
 

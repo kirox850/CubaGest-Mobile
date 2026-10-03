@@ -229,6 +229,57 @@ export default function CierreCajaScreen() {
     }
   };
 
+  // ── Detalle del cierre ───────────────────────────────────────────────────────
+  //
+  // Estos tres handlers vivían AQUÍ ABAJO, después del `return` de la vista de
+  // lista. Con la lista en pantalla ese return se ejecuta y la declaración
+  // nunca llegaba a correr, así que `openDetail` valía `undefined` y tocar
+  // cualquier cierre petaba con "undefined is not a function". Metro transpila
+  // `const` a `var`, que se iza pero sin valor: por eso el síntoma era ese y no
+  // un ReferenceError. TypeScript no lo ve porque el uso está dentro de una
+  // arrow del JSX, que puede invocarse más tarde.
+  //
+  // Van aquí arriba con el resto de handlers (`startClosing`, `selectReading`,
+  // `confirmClosing`, `openReading`) para que en CUALQUIER vista ya existan.
+  const openDetail = async (c: Closing) => {
+    setDetailClosing(c);
+    setView('detail');
+    // El detalle NO es la fila de la lista. `GET /closing` devuelve las filas
+    // crudas; solo `GET /closing/:id` añade `notas`, `explicaciones` y
+    // `pendientes` — ya descontado lo explicado. Sin esta llamada, la pantalla
+    // nunca puede decir si un cierre está resuelto, porque no tiene el dato.
+    try {
+      setDetailClosing(await ClosingAPI.detail(c.id));
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+
+  const explicar = async (currency: string, amount: number, note: string) => {
+    if (!detailClosing) return;
+    try {
+      await ClosingAPI.explain(detailClosing.id, { currency, amount, note });
+      // Se vuelve a pedir el detalle: el `status` cambia en el servidor según lo
+      // que quedaba por cuadrar, y recalcularlo aquí sería adivinar.
+      setDetailClosing(await ClosingAPI.detail(detailClosing.id));
+      await loadClosings();
+    } catch (e) {
+      // 400 = el importe no coincide EXACTO. 409 = el cierre ya no espera
+      // explicaciones. El mensaje del servidor dice cuál de las dos fue.
+      showError((e as Error).message);
+    }
+  };
+
+  const anotar = async (productId: string, note: string) => {
+    if (!detailClosing) return;
+    try {
+      await ClosingAPI.addNote(detailClosing.id, { productId, note });
+      setDetailClosing(await ClosingAPI.detail(detailClosing.id));
+    } catch (e) {
+      showError((e as Error).message);
+    }
+  };
+
   // ── Lista de cierres ───────────────────────────────────────────────────────
   if (view === 'list') {
     return (
@@ -606,46 +657,6 @@ export default function CierreCajaScreen() {
       </View>
     );
   }
-
-  // ── Detalle del cierre ─────────────────────────────────────────────────────
-  const openDetail = async (c: Closing) => {
-    setDetailClosing(c);
-    setView('detail');
-    // El detalle NO es la fila de la lista. `GET /closing` devuelve las filas
-    // crudas; solo `GET /closing/:id` añade `notas`, `explicaciones` y
-    // `pendientes` — ya descontado lo explicado. Sin esta llamada, la pantalla
-    // nunca puede decir si un cierre está resuelto, porque no tiene el dato.
-    try {
-      setDetailClosing(await ClosingAPI.detail(c.id));
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  };
-
-  const explicar = async (currency: string, amount: number, note: string) => {
-    if (!detailClosing) return;
-    try {
-      await ClosingAPI.explain(detailClosing.id, { currency, amount, note });
-      // Se vuelve a pedir el detalle: el `status` cambia en el servidor según lo
-      // que quedaba por cuadrar, y recalcularlo aquí sería adivinar.
-      setDetailClosing(await ClosingAPI.detail(detailClosing.id));
-      await loadClosings();
-    } catch (e) {
-      // 400 = el importe no coincide EXACTO. 409 = el cierre ya no espera
-      // explicaciones. El mensaje del servidor dice cuál de las dos fue.
-      showError((e as Error).message);
-    }
-  };
-
-  const anotar = async (productId: string, note: string) => {
-    if (!detailClosing) return;
-    try {
-      await ClosingAPI.addNote(detailClosing.id, { productId, note });
-      setDetailClosing(await ClosingAPI.detail(detailClosing.id));
-    } catch (e) {
-      showError((e as Error).message);
-    }
-  };
 
   if (view === 'detail' && detailClosing) {
     const c = detailClosing;

@@ -1,6 +1,6 @@
 import React, { useCallback, useState } from 'react';
+import { RecargaAlMontar, RecargaAlEnfocar } from '../components/Recarga';
 import { View, Text, StyleSheet, FlatList, Modal, Share } from 'react-native';
-import { useFocusEffect } from '@react-navigation/native';
 import { UsersAPI, type UserActivation } from '../api/endpoints';
 import { ROLES } from '../config/roles';
 import { colors, themeRef } from '../config/theme';
@@ -40,7 +40,9 @@ export default function UsuariosScreen({ embedded = false }: { embedded?: boolea
     }
   }, []);
 
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  // Ver components/Recarga.tsx: la recarga se delega a un hijo, porque
+  // `useFocusEffect` exige un NavigationContainer encima y embebida en
+  // Configuración no lo hay. Por qué un hijo y no un `if` está en ese archivo.
 
   const openNew = () => {
     setEditTarget(null);
@@ -113,8 +115,13 @@ export default function UsuariosScreen({ embedded = false }: { embedded?: boolea
     catch (err) { showError((err as Error).message); };
   };
 
+
   return (
     <View style={styles.wrap}>
+      {embedded
+        ? <RecargaAlMontar fn={load} />
+        : <RecargaAlEnfocar fn={load} />
+      }
       {/* Header — igual que la web: título + botón Nuevo Usuario */}
       <View style={styles.header}>
         <View style={{ flexShrink: 1 }}>

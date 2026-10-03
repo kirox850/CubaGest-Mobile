@@ -24,7 +24,7 @@
 
 import React, { useCallback, useState } from 'react';
 import { View, Text, StyleSheet, Pressable, TouchableOpacity } from 'react-native';
-import { useFocusEffect } from '@react-navigation/native';
+import { RecargaAlMontar, RecargaAlEnfocar } from './Recarga';
 import { SettingsAPI } from '../api/endpoints';
 import { colors, themeRef } from '../config/theme';
 import { enRango, errorDeRango, valorDeTolerancia, avisoTolerancia, type ToleranciaModo } from '../config/tolerancia';
@@ -57,8 +57,6 @@ export default function CajaSettings({ embedded = false }: { embedded?: boolean 
     }
   }, []);
 
-  useFocusEffect(useCallback(() => { void cargar(); }, [cargar]));
-
   const guardar = async () => {
     const v = valorDeTolerancia(valor, modo);
     if (v === null) {
@@ -81,11 +79,20 @@ export default function CajaSettings({ embedded = false }: { embedded?: boolean 
     }
   };
 
-  if (loading) return <View style={styles.wrap}><Spinner /></View>;
+  // El `return` de carga tiene que montar la recarga TAMBIÉN. Si se deja solo en
+  // la rama de abajo, nunca monta: en el primer render `loading` es true, así que
+  // se va por aquí, y el hijo que dispara la carga vive en una rama que no se
+  // llega a pintar. El esqueleto se queda para siempre.
+  const recarga = embedded
+    ? <RecargaAlMontar fn={cargar} />
+    : <RecargaAlEnfocar fn={cargar} />;
+
+  if (loading) return <View style={styles.wrap}>{recarga}<Spinner /></View>;
   const numero = Number(valor.replace(',', '.')) || 0;
 
   return (
     <View style={styles.wrap}>
+      {recarga}
       {!embedded && (
         <TouchableOpacity style={styles.back} onPress={() => {}}>
           <Text style={styles.backText}>Caja</Text>

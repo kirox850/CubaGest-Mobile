@@ -22,8 +22,8 @@
 //     caja, que es el dato que más le afecta.
 
 import React, { useCallback, useState } from 'react';
+import { RecargaAlMontar, RecargaAlEnfocar } from '../components/Recarga';
 import { View, Text, StyleSheet, FlatList, Pressable, TouchableOpacity } from 'react-native';
-import { useFocusEffect } from '@react-navigation/native';
 import { LocationsAPI, ShiftAPI, UsersAPI } from '../api/endpoints';
 import { colors, themeRef } from '../config/theme';
 import { Badge, Btn, EmptyState, ErrorBanner, Inp, SectionCard, Sel, Skeleton, SkeletonText, Spinner, showToast } from '../components/UI';
@@ -65,7 +65,9 @@ export default function CajasAdminScreen({ embedded = false }: { embedded?: bool
     }    setLoading(false);
   }, []);
 
-  useFocusEffect(useCallback(() => { void cargar(); }, [cargar]));
+  // Ver components/Recarga.tsx: la recarga se delega a un hijo, porque
+  // `useFocusEffect` exige un NavigationContainer encima y embebida en
+  // Configuración no lo hay. Por qué un hijo y no un `if` está en ese archivo.
 
   const cajas = locations.filter((l) => l.type === 'caja');
   const cajero = cajeros.find((u) => u.id === usuarioId);
@@ -127,6 +129,10 @@ export default function CajasAdminScreen({ embedded = false }: { embedded?: bool
   if (loading) {
     return (
       <View style={styles.wrap}>
+        {embedded
+          ? <RecargaAlMontar fn={cargar} />
+          : <RecargaAlEnfocar fn={cargar} />
+        }
         <Skeleton w="70%" h={20} />
         <SkeletonText lines={2} w="85%" />
         <Skeleton w="100%" h={132} r={14} style={{ marginTop: 16 }} />
@@ -195,6 +201,7 @@ export default function CajasAdminScreen({ embedded = false }: { embedded?: bool
       </View>
     );
   }
+
 
   return (
     <View style={styles.wrap}>

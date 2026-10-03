@@ -19,27 +19,40 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { ROLES } from '../roles';
 
+// Configuración dejó de ser un modal con pestañas propias: ahora son grupos de la
+// barra de abajo. Los grupos viven en ConfigGrupo, y cada uno declara además las
+// PARTES que contiene, porque el gate va por parte y no por grupo — "Usuarios" es
+// de admin y "Auditoría" no, y metidos en el mismo grupo los dos siguen teniendo
+// que distinguirse.
 const PANTALLA = readFileSync(
-  join(__dirname, '..', '..', 'screens', 'ConfiguracionScreen.tsx'),
+  join(__dirname, '..', '..', 'screens', 'ConfigGrupo.tsx'),
   'utf8',
 );
 
-/** Las 7 pestañas de la web, en su orden, con su gate. */
+/**
+ * Las 7 PARTES en las que sigue repartiéndose la configuración, con su gate.
+ *
+ * Antes eran 7 pestañas y ahora son 7 partes metidas en 5 grupos, porque la barra
+ * de abajo no admite 7. Lo que este test protege no ha cambiado: siguen siendo las
+ * mismas 7 cosas con los mismos permisos, solo que agrupadas de otra manera. Las
+ * etiquetas son las de cada parte, cortas porque van dentro de un interruptor; el
+ * nombre largo de la sección es el del grupo.
+ */
 // `roles: undefined` significa SIN GATE, que es un dato y no una ausencia: es
-// justo la diferencia entre la pestaña de Cajas y la de Cierre de caja.
+// justo la diferencia entre la parte de Cajas y la de Cierre de caja.
 const ESPERADO: { id: string; label: string; roles?: string[]; perms?: string[] }[] = [
-  { id: 'cajas',      label: 'Cajas',           roles: ['admin'] },
-  { id: 'caja',       label: 'Cierre de caja' },
-  { id: 'monedas',    label: 'Monedas y tasas', roles: ['admin'] },
-  { id: 'descuentos', label: 'Descuentos',      roles: ['admin'] },
-  { id: 'usuarios',   label: 'Usuarios',        roles: ['admin'] },
-  { id: 'auditoria',  label: 'Auditoría',       perms: ['auditoria'] },
+  { id: 'cajas',      label: 'Cajas',      roles: ['admin'] },
+  { id: 'caja',       label: 'Cierre' },
+  { id: 'monedas',    label: 'Monedas',    roles: ['admin'] },
+  { id: 'descuentos', label: 'Descuentos', roles: ['admin'] },
+  { id: 'usuarios',   label: 'Usuarios',   roles: ['admin'] },
+  { id: 'auditoria',  label: 'Auditoría',  perms: ['auditoria'] },
   { id: 'plan',       label: 'Mi plan' },
 ];
 
 /** Extrae el array TABS del archivo, sin importar React. */
 function leerTabs(): { id: string; label: string; roles?: string[]; perms?: string[] }[] {
-  const ini = PANTALLA.indexOf('const TABS: TabDef[] = [');
+  const ini = PANTALLA.indexOf('export const GRUPOS: GrupoDef[] = [');
   const fin = PANTALLA.indexOf('\n];', ini);
   const cuerpo = PANTALLA.slice(PANTALLA.indexOf('[', ini) + 1, fin);
   return cuerpo
@@ -60,7 +73,7 @@ function leerTabs(): { id: string; label: string; roles?: string[]; perms?: stri
     });
 }
 
-describe('Configuración tiene las 7 pestañas de la web, con los mismos gates', () => {
+describe('Configuración conserva las 7 partes con sus mismos gates', () => {
   const tabs = leerTabs();
 
   it('son 7, en el mismo orden y con las mismas etiquetas', () => {
@@ -68,7 +81,7 @@ describe('Configuración tiene las 7 pestañas de la web, con los mismos gates',
     expect(tabs.map((t) => t.label)).toEqual(ESPERADO.map((t) => t.label));
   });
 
-  it('"Cierre de caja" NO es de admin: es la que se le perdía al cajero', () => {
+  it('la parte de cierre NO es de admin: es la que se le perdía al cajero', () => {
     // La aserción que da nombre a la fase. `PUT /settings` no lleva
     // requireRole, igual que en la web; si algún día esta línea falla, alguien
     // ha puesto un gate donde no va, y el cajero ha perdido el margen de su caja.
@@ -77,7 +90,7 @@ describe('Configuración tiene las 7 pestañas de la web, con los mismos gates',
     expect(tabs.find((t) => t.id === 'cajas')!.roles).toEqual(['admin']);
   });
 
-  it('cada pestaña con gate coincide con el de la web', () => {
+  it('cada parte con gate coincide con el de la web', () => {
     for (const e of ESPERADO) {
       const t = tabs.find((x) => x.id === e.id)!;
       expect({ id: t.id, roles: t.roles, perms: t.perms })
@@ -95,6 +108,21 @@ describe('Configuración tiene las 7 pestañas de la web, con los mismos gates',
       );
       if (rol === 'admin') expect(veAdmin.length).toBeGreaterThan(0);
     }
+  });
+
+  it('los grupos caben en la barra: son 5 o menos', () => {
+    // El motivo por el que las 7 partes se agruparon. Si alguien añade un grupo
+    // sin mirar esto, la barra vuelve a apretar los iconos — que es justo el
+    // problema que motivó el agrupamiento.
+    const cuerpo = PANTALLA.split('export const GRUPOS: GrupoDef[] = [')[1].split('\n];')[0];
+    const n = (cuerpo.match(/^  \{$/gm) || []).length;
+    expect(n).toBeGreaterThan(0);
+    expect(n).toBeLessThanOrEqual(5);
+  });
+
+  it('ninguna parte se queda fuera de su grupo', () => {
+    // Agrupar es reordenar, no dejar de exponer nada: las 7 siguen ahí.
+    for (const e of ESPERADO) expect(tabs.map((t) => t.id)).toContain(e.id);
   });
 
   it('la tolerancia vive en su propio archivo, sin filtro de rol', () => {
