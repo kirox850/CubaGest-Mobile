@@ -55,9 +55,10 @@ Dev: `jest ^29.7.0`, `jest-expo ^57.0.0`, `typescript ~6.0.3`,
   funcionó**. Se desinstaló. Ver §12.
 - **`expo-blur`**: el cristal de la barra también se probó y se revirtió.
 - **`expo-secure-store`**: los tokens se guardan en AsyncStorage a propósito.
-  Ver §6.4 — es una decisión de producto documentada, no un descuido.
+  Ver §16 (deuda técnica, punto 1): es una decisión de producto documentada,
+  no un descuido.
 - **`@testing-library/react-native`**: no está. Por eso los tests son de
-  *lógica pura* y de *texto*, no de render. Ver §11.
+  *lógica pura* y de *texto*, no de render. Ver §14.
 
 ### 1.3 Dos declaraciones de versión que no cuadran
 
@@ -96,7 +97,7 @@ Scripts literales de `package.json`:
 | Tests en modo CI | `npx jest --ci` | Sin watch, un solo pase |
 | Un test | `npx jest src/config/__tests__/configuracion.test.ts` | |
 | Tipos | `npm run typecheck` | `tsc --noEmit`, limpio hoy |
-| Lint | `npm run lint` | ⚠️ **FALLA**: no hay configuración de ESLint. Ver §14 |
+| Lint | `npm run lint` | ⚠️ **FALLA**: no hay configuración de ESLint. Ver §15.2 |
 | APK de release | `.github/workflows/build-android.yml` | Manual, ver §13 |
 
 ### 2.1 ⚠️ En Expo, `npm install` NO vale para añadir cosas
@@ -131,7 +132,7 @@ npx expo start --clear
 1. `npm start` → sale un QR.
 2. **Expo Go** (Android: dentro de la app; iPhone: desde la Cámara).
 3. La app **debe** hablar con el backend: el host está en `src/api/config.ts`
-   (§4.3).
+   (§3.3).
 4. Con Metro corriendo, los cambios se recargan solos; no hay que reescanear.
 
 > Expo Go solo ejecuta proyectos cuyo SDK coincide con el de tu app Expo Go.
@@ -159,7 +160,7 @@ npx expo start --clear
 | `babel.config.js` | `babel-preset-expo` + alias `@` → `./src` (`babel-plugin-module-resolver`) |
 | `metro.config.js` | `expo/metro-config` por defecto |
 | `tsconfig.json` | `strict: true`, `jsx: react-native`, `noEmit`, alias `@/*` → `./src/*`, extiende `expo/tsconfig.base` |
-| `jest.config.js` / `jest.setup.js` | Ver §11 |
+| `jest.config.js` / `jest.setup.js` | Ver §14.2 |
 | `react-native.config.js` | Declara `assets: ['./assets/fonts/']` ⚠️ **esa carpeta no existe** |
 | `.gitignore` | Excluye `node_modules/`, `.expo/`, `android/`, `ios/`, `.env*` |
 
@@ -216,11 +217,10 @@ Cómo se resuelve el host, de punta a punta:
 4. No hay resolución dinámica, ni por entorno, ni por plataforma, ni por
    `Platform.OS`. **Cambiar de backend = editar esa línea.**
 
-> ⚠️ Consecuencia práctica: en desarrollo **no hay modo local**. Si necesitas
-> apuntar a `http://192.168.x.x:4000/api`, edita el fichero, y Edmondo
-> Sebastián avisa cuando vuelvas a producción. (El README anterior proponía
-> cambiar esta URL "abre y cierra el fichero"; la alternativa sería
-> `__DEV__ ? dev : prod`, pero nadie la ha implementado.)
+> ⚠️ Consecuencia práctica: **no hay modo local de API**. Apuntar a un backend
+> de desarrollo exige editar esa línea y acordarse de volver atrás. La
+> alternativa sería `__DEV__ ? dev : prod`, pero nadie la ha implementado; si se
+> hace, `npx expo install` sigue siendo la vía para instalar lo que haga falta.
 
 ### 3.4 Timeout y errores de red
 
@@ -247,12 +247,12 @@ src/
 │   ├── sessionEvents.ts     Bus de eventos de sesión
 │   ├── userShape.ts         normalizeUser / companyIdOf
 │   └── __tests__/
-├── components/              UI compartida (14 ficheros)
+├── components/              UI compartida (13 ficheros)
 ├── config/                  Tokens y REGLAS PURAS (sin React) (11 + 19 tests)
 ├── context/                 Auth, Sync, Theme
 ├── hooks/                   useShift, useLocations, useOnlineStatus
 ├── navigation/              AppNavigator.tsx (el navegador entero)
-├── offline/                 Store, sync, namespace, warm cache (6 + 31 tests)
+├── offline/                 Store, sync, namespace, warm cache (6 ficheros, 6 suites, 50 tests)
 ├── screens/                 16 pantallas
 ├── types/index.ts           32 interfaces del dominio
 └── utils/                   csv.ts (export vía share sheet), uuid.ts
@@ -285,7 +285,9 @@ Es el fichero con más "por qué" del repo. Estructura:
 2. **`HeaderRight`** — píldoras de estado (offline, sync, conflictos), avatar,
    y el **menú de perfil** (modal con Configuración, módulos desbordados,
    Entradas y Salidas, tour, modo oscuro, legales y cerrar sesión).
-3. **`TrialBanner`** — banner de prueba gratuita (naranja a ≤7 días).
+3. **`TrialBanner`** — banner de prueba gratuita: azul
+>   (`colors.primaryText`) y naranja (`colors.warningText`) a ≤7 días, y
+>   pulsable: lleva a **Mi plan**.
 4. **`AppNavigator`** — calcula permisos → tabs → desbordados → grupos de
    Configuración, y monta un único `NavigationContainer` con un
    `createBottomTabNavigator`.
@@ -315,7 +317,7 @@ Detalles que hay que conocer antes de tocarlo:
 
 ### 4.4 `src/api/`
 
-Ver §6 (API). `endpoints.ts` son 333 líneas puras de catálogo, sin lógica.
+Ver §8 (API). `endpoints.ts` son 333 líneas puras de catálogo, sin lógica.
 
 ### 4.5 `src/config/` — tokens y reglas puras
 
@@ -611,8 +613,8 @@ del `return`**:
 Eso **construye el elemento y lo tira**. No se monta nada. No hay excepción, no
 hay warning, no hay nada. `RecargaAlMontar` nunca se montaba → `load()` nunca
 se llamaba → y como las pantallas arrancan con `loading = true`, **el esqueleto
-se quedaba para siempre**. Cinco pantallas (Cajas, Cierre, Monedas, Usuarios,
-Auditoría) se quedaban en blanco sin decir por qué.
+se quedaba para siempre**. Cinco pantallas —Cajas, Cierre de caja, Monedas,
+Usuarios y Auditoría— se quedaban en blanco sin decir por qué.
 
 El elemento tiene que ir **dentro del JSX que se pinta**. Hoy se hace así:
 
@@ -636,19 +638,20 @@ en una rama que no se llega a pintar."*
 
 ### 6.3 Estado actual: la mitad del patrón ya no se ejercita
 
-Las seis pantallas con prop `embedded` (`CajasAdminScreen`, `CajaSettings`,
-`MonedasScreen`, `DiscountsScreen`, `UsuariosScreen`, `AuditoriaScreen`) se
-montan **siempre** con `embedded` desde `ConfigGrupo.tsx`, y todas viven ya
-**dentro** del `NavigationContainer`. Comprobado con grep: no hay ni un solo
-uso no-embebido.
+Las siete pantallas con prop `embedded` (`CajasAdminScreen`, `CajaSettings`,
+`MonedasScreen`, `DiscountsScreen`, `UsuariosScreen`, `AuditoriaScreen` y
+`PlanModal`) se montan **siempre** con `embedded` desde `ConfigGrupo.tsx`, y
+todas viven ya **dentro** del `NavigationContainer`. Comprobado con grep: no
+hay ni un solo uso no-embebido.
 
 Consecuencias:
 
 1. En la práctica esas pantallas usan siempre `RecargaAlMontar`.
 2. `RecargaAlEnfocar` sigue siendo **el camino correcto** para cualquier
-   pantalla que viva suelta en el navegador (`CierreCajaScreen`,
-   `DashboardScreen`, `InventarioScreen`, `POSScreen`, `FacturacionScreen`,
-   `ContabilidadScreen`, `TransferenciasScreen` lo usan directamente).
+   pantalla que viva suelta en el navegador. Hoy lo usan directamente
+   `useFocusEffect`: `DashboardScreen`, `POSScreen`, `FacturacionScreen`,
+   `InventarioScreen`, `CierreCajaScreen`, `ContabilidadScreen`,
+   `TransferenciasScreen` y `MovimientosDineroScreen`.
 3. El comentario de cabecera de `Recarga.tsx` (`:3-14`) sigue describiendo el
    `ConfiguracionScreen` modal, que **ya no existe**. El componente sigue
    siendo correcto; su explicación histórica ya no. No lo tomes como
@@ -677,8 +680,11 @@ un color inline fuera de la lista de excepciones.
 - `NAVY = #0B1220`: fondo del login y del header, **fijo en los dos temas**.
 - Paletas completas `light` y `dark` con superficies (`bg`, `bgCard`,
   `bgSecondary`), bordes, inputs, textos (`text`, `textSecondary`,
-  `textMuted`), acentos (`success`, `warning`, `danger`) y **ocho tonos de
-  texto** (`successText`, `warningText`, `dangerText`, `primaryText`, …).
+  `textMuted`), acentos (`success`, `warning`, `danger`), **tonos de texto para
+  escribir encima** (`successText`, `warningText`, `dangerText`, `primaryText`,
+  `infoText` — los acentos están elegidos como *relleno*, y puestos como texto
+  sobre blanco el naranja mediría 2.8:1) y los tonos de la banda de
+  sincronización (`syncOk`, `syncBusy`, `syncWarn`, `syncError`).
 - El tema oscuro usa `rgba()` para fondos translúcidos; el claro, hex.
 
 **Excepción deliberada (documentada en `theme.ts:100-127`, no la "arregles"):**
@@ -764,7 +770,8 @@ Dos cortes, no los siete de la web (que es una rejilla de escritorio):
   paridad sería una casualidad y no una decisión."*
 - **1024** — el punto en que la barra inferior se convertiría en barra lateral.
   No viene de una media query de contenido: es el ancho a partir del cual un
-  dedo alcanza la columna de la izquierda y los dos lados cómodo.
+  dedo alcanza cómodamente la columna de la izquierda con el teléfono en la
+  otra mano. Por debajo, una barra lateral obliga a estirar el brazo.
 
 Entre 860 y 1024 se aplica `tablet`. Motivo real de que el módulo exista: *la
 pantalla de cierre en una tablet es un formulario de dinero*; a 360px la misma
@@ -915,6 +922,15 @@ La app es **offline-first**, no "tolerante a cortes":
   a propósito: `apiFetch` traduce cualquier fallo de red (y algún 403) a
   `OFFLINE_MESSAGE`, así que usarlo sería medir dos cosas a la vez.
 
+**Cómo probarlo en 4 pasos** (sigue valiendo):
+
+1. Inicia sesión y entra en **Punto de Venta**.
+2. Activa el **modo avión**.
+3. Vende: verás la franja "MODO OFFLINE" y la factura quedará como
+   `LOCAL-XXXX`.
+4. Desactiva el modo avión: la píldora del header sincroniza sola (o toca
+   **⟳ Sincronizar ahora** en Facturas). Revisa después en la web.
+
 ---
 
 ## 11. Conceptos de dominio
@@ -934,20 +950,40 @@ total de la empresa y **no** se usa para vender.
 personas — la mercancía física es una sola. Por eso `inventory_locations.ownerUserId`
 está **obsoleto a propósito**: se conserva como respaldo de las cajas creadas
 antes del cambio y preguntarle por él daba `false` siempre. (El comentario más
-completo está en `CubaGest/src/routes/transfers.ts:51-59`.)
+completo está en `CubaGest/src/routes/transfers.ts:50-59`.)
 
-**Mi caja de trabajo** (`resolveOwnLocation`, backend; `config/locationResolution.ts`
-en el móvil, que es su copia):
+**Mi caja de trabajo.** Hay una regla autoritativa en el servidor
+(`resolveOwnLocation`, backend) y una copia en el móvil
+(`config/locationResolution.ts`, que es la de la web), con una diferencia
+deliberada:
+
+*Servidor* (`CubaGest/src/lib/locations.ts:150-179`):
 
 1. `almacenista` → el almacén central activo.
 2. `cajero` → **turno abierto** → su caja; sin turno y con **una sola** caja
    asignada → esa; con varias → `null` (tiene que abrir turno y elegir).
 3. `admin` → turno abierto → su caja; sin turno → el almacén central.
 
+*Móvil / web* (`locationResolution.ts:58-97`, copia de `POS.tsx`):
+
+1. El **turno abierto** manda por encima de todo (se busca sobre todas las
+   ubicaciones, no solo las activas: si el turno dice caja 2, esa es la caja 2).
+2. El **almacén**, para el `almacenista`.
+3. La **única caja asignada**, para el cajero que solo tiene una.
+4. La **recordada** o la **primera disponible** (nunca una caja borrada o
+   desactivada: es un id muerto), para el admin y cualquier otro rol.
+
+La diferencia del paso 3 es explícita en el código: un cajero con **varias**
+cajas y **sin turno** devuelve `null` en el móvil (como el servidor) en vez de
+caer en "la primera disponible" (como hace la web). *"Si el móvil eligiera una
+por su cuenta, el cajero vería un catálogo con stock de una caja, cobraría
+contra ella y el servidor rechazaría la venta — o peor, la aceptaría en
+otra."* Devolver `null` obliga a la pantalla a preguntar, que es lo que hace
+`debePedirTurno` (misma carpeta, a propósito).
+
 El turno manda porque la caja es del negocio y la pueden llevar varios cajeros
-en distintos momentos. El móvil replica ese orden; si cambia uno, cambia el
-otro, o se rompe la paridad y el stock se descuenta de una caja mientras se
-vende en otra.
+en distintos momentos. Si el orden cambia en un sitio, hay que cambiarlo en
+los tres, o el stock se descuenta de una caja mientras se vende en otra.
 
 **Turno** = "esta persona, en esta caja, desde esta hora". `GET /shift/current`
 devuelve `{ shift, assignedCajas, aviso }` — **`assignedCajas`, no `cajas`**:
@@ -971,7 +1007,8 @@ error. `businessAt` es la hora **en la que se cuenta**, no la de ahora.
 con su vecina **inmediata** anterior. Si falta un eslabón, solo difiere **su**
 comparación entrante; el resto de la cadena sigue viva. Una caja sin ninguna
 foto previa no "le falta" un eslabón: la cadena empieza ahí. Los pares se
-guardan en `turn_reconciliations` con estado `conciliado | diferente`.
+guardan en `turn_reconciliations` con estado `conciliado | diferente` (el enum
+tiene un tercer valor, `pendiente`, que hoy el reconciliador no escribe nunca).
 
 **Cerrar el turno ES cerrar el periodo.** `POST /shift/end` reutiliza el
 **mismo handler** que `POST /closing/confirm` (no hay dos maneras de cerrar un
@@ -1162,9 +1199,9 @@ npx jest src/config/__tests__/configuracion.test.ts
 | `config/ubicacionInicial` | 6 | que una elección del usuario no se pise |
 | `config/debePedirTurno` | 6 | cuándo interrumpir al cajero |
 | `config/selNoModal` | 5 | `Sel` no es una ventana del sistema |
+| `offline/adoptUnscoped` | 5 | no adopta datos de otra cuenta (uno de ellos usa `test()` en vez de `it()`) |
 | `config/noSystemAlert` | 4 | ningún `Alert.alert` sobrevive |
 | `config/noInlineColors` | 4 | ningún color suelto fuera de las excepciones |
-| `offline/adoptUnscoped` | 5 | no adopta datos de otra cuenta (uno de ellos usa `test()` en vez de `it()`) |
 
 ### 14.2 Por qué el preset de Jest es `react-native` y no `jest-expo`
 
@@ -1233,7 +1270,7 @@ contrato que hay. Ejemplos reales:
   fallar en producción con un 400/403 en la caja."*
 - `useShift.test.ts`: *"El hook no se monta (no hay
   @testing-library/react-native en este repo), así que…"* — los hooks se prueban
-  sobre la función pura queInterna, no sobre el hook.
+  sobre la función pura que hay detrás, no sobre el hook.
 - `syncCycle.ts`: *"El temporizador de React no se puede probar sin
   @testing-library/react-native, pero la CONDICIÓN que decide si la pasada
   ocurre sí: y es la que importa."*
@@ -1305,8 +1342,8 @@ local sin editar el fichero (§3.3).
 
 ### 15.5 La mitad del patrón `Recarga` es código inalcanzable
 
-La rama `!embedded` de las seis pantallas de Configuración y su
-`RecargaAlEnfocar` no se ejecutan nunca (§6.3).
+La rama `!embedded` de las pantallas de Configuración (las siete con la prop)
+y su `RecargaAlEnfocar` no se ejecutan nunca (§6.3).
 
 ### 15.6 `menuScreens` filtra claves que no existen
 
@@ -1356,7 +1393,7 @@ Ordenada por lo que más cuesta si se deja.
    reviente. El patrón está, pero no hay lint que lo compruebe.
 3. **Duplicación de datos declarados con la web**: matriz de roles, tabla de
    los 7 gates, orden de resolución de caja. Los tres están replicados "a mano
-   con un test al lado", ninguno lee el repo hermano (§14.3.1).
+   con un test al lado", ninguno lee el repo hermano (§14.3).
 4. **`src/types/index.ts` con 32 interfaces** escritas contra lo que el backend
    devuelve hoy, no generadas desde el esquema. Cuando el backend cambie una
    forma, el typecheck no avisa.
@@ -1371,13 +1408,15 @@ Ordenada por lo que más cuesta si se deja.
    `InventarioScreen` (692). El cierre tiene máquina de vistas explícita
    (`ViewMode`), lo cual ayuda; el POS todavía mezcla catálogo, carrito, turno y
    cola offline en el mismo componente.
-9. **El `Alert` del sistema ya no se usa** (83 replacements en `dialogs.tsx`),
-   pero `AppModal` y los sheets siguen siendo `Modal` de RN: no tienen
-   animación de hoja nativa ni arrastrar para cerrar.
+9. **El `Alert` del sistema ya no se usa** (había 83 `Alert.alert`; los
+   sustituyen `showAlert`/`showConfirm` de `dialogs.tsx`), pero `AppModal` y los
+   sheets siguen siendo `Modal` de RN: no tienen animación de hoja nativa ni
+   arrastrar para cerrar.
 10. **`src/config/legalContent.ts`** lleva datos legales reales y de contacto
     como `[TU NOMBRE COMPLETO]`: hay que rellenar eso antes de publicar.
-11. **El `README` anterior prometía credenciales de prueba que no se han podido
-    verificar** (§2.2).
+11. **Credenciales de prueba sin fuente**: las que citaba el README anterior no
+    aparecen en ningún fichero del workspace (§2.2). No las publiques en otra
+    documentación hasta confirmarlas contra la semilla real de D1.
 
 ---
 
