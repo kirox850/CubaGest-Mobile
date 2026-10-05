@@ -225,6 +225,8 @@ export const ClosingAPI = {
     countedAt?: string;
   }): Promise<Closing> =>
     apiFetch('/closing/confirm', { method: 'POST', body }),
+  retry: (id: string): Promise<{ cierre: Closing; recalculo: unknown }> =>
+    apiFetch(`/closing/${id}/retry`, { method: 'POST' }),
   // Explicar un descuadre de DINERO. La cantidad tiene que coincidir con el
   // descuadre EXACTO (el servidor rechaza con 400 AMOUNT_MISMATCH si no), y la
   // nota no puede estar vacía. Respuesta 409 = el cierre ya no está esperando

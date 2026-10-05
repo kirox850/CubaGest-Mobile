@@ -33,6 +33,7 @@ export default function CierreCajaScreen() {
   const [readingLocationId, setReadingLocationId] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [retrying, setRetrying] = useState(false);
   const [selectedReading, setSelectedReading] = useState<InventoryReading | null>(null);
   const [preview, setPreview] = useState<ClosingPreview | null>(null);
   const [validatedItems, setValidatedItems] = useState<Record<string, string>>({});
@@ -277,6 +278,24 @@ export default function CierreCajaScreen() {
       setDetailClosing(await ClosingAPI.detail(detailClosing.id));
     } catch (e) {
       showError((e as Error).message);
+    }
+  };
+
+  const retryClosing = async () => {
+    if (!detailClosing) return;
+    try {
+      setRetrying(true);
+      const response = await ClosingAPI.retry(detailClosing.id);
+      const updated = response.cierre;
+      setDetailClosing(updated);
+      await loadClosings();
+      showToast(updated.status === 'cerrado'
+        ? 'El cierre ya cuadra con las ventas sincronizadas.'
+        : 'El cierre fue recalculado; todavía queda un descuadre pendiente.', 'success');
+    } catch (e) {
+      showToast((e as Error).message || 'No se pudo recalcular el cierre', 'error');
+    } finally {
+      setRetrying(false);
     }
   };
 
@@ -679,6 +698,17 @@ export default function CierreCajaScreen() {
                   </View>
                 ) : null}
 
+        {provisional && (
+          <Btn
+            variant="secondary"
+            icon="refresh"
+            label={retrying ? 'Recalculando…' : 'Recalcular con ventas sincronizadas'}
+            onPress={retryClosing}
+            disabled={retrying}
+            style={{ marginHorizontal: 12, marginTop: 12 }}
+          />
+        )}
+
         <View style={styles.detailGrid}>
           <View style={styles.detailCard}>
             <Text style={styles.statLabel}>Total ingresos</Text>
@@ -815,4 +845,3 @@ export const styles = new Proxy({} as ReturnType<typeof createStyles>, {
     return __styles[prop as keyof ReturnType<typeof createStyles>];
   },
 });
-

@@ -94,7 +94,7 @@ describe('sinContar', () => {
 describe('baseCashDe', () => {
   // El fondo del turno es el dato del que depende toda la conciliación: sin él,
   // un faltante de 200 al cerrar es indistinguible de "ya faltaban 200 al
-  // abrir". Y un 0 explícito no cuenta: el backend lo descarta al normalizar.
+  // abrir". Un 0 explícito sí cuenta: es una caja vacía, no un dato ausente.
   it('manda solo las monedas con importe', () => {
     expect(baseCashDe([{ cur: 'CUP', valor: '1000' }])).toEqual({ CUP: 1000 });
   });
@@ -103,8 +103,8 @@ describe('baseCashDe', () => {
     expect(baseCashDe([{ cur: 'CUP', valor: '' }])).toEqual({});
   });
 
-  it('un 0 explícito ni un negativo se mandan', () => {
-    expect(baseCashDe([{ cur: 'CUP', valor: '0' }])).toEqual({});
+  it('un 0 explícito sí se manda, pero un negativo no', () => {
+    expect(baseCashDe([{ cur: 'CUP', valor: '0' }])).toEqual({ CUP: 0 });
     expect(baseCashDe([{ cur: 'CUP', valor: '-50' }])).toEqual({});
   });
 

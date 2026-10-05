@@ -83,17 +83,21 @@ export type FilaMoneda = { cur: string; valor: string };
  * faltante de 200 al cerrar no se distingue de "ya faltaban 200 al abrir". Por
  * eso se pregunta al abrir el turno y no al cerrarlo.
  *
- * Solo se envían las monedas con un importe REAL. Un campo vacío, un 0 o un
- * negativo no se mandan: el backend descarta los ceros al normalizar, y
- * "abro con 0" no es lo mismo que "no dijiste cuánto abrías con".
+ * Un campo vacío no declara nada; un 0 explícito sí declara una caja vacía.
+ * Esa diferencia permite distinguir "abrió con 0" de "no dijo cuánto había".
  */
 export function baseCashDe(filas: FilaMoneda[] | undefined): Cajas {
   const out: Cajas = {};
   for (const f of filas || []) {
     const cur = (f?.cur || '').trim().toUpperCase().slice(0, 8);
     if (!cur) continue;
+    if (typeof f?.valor === 'string' && f.valor.trim() === '') continue;
     const v = Number(f?.valor);
-    if (Number.isFinite(v) && v > 0) out[cur] = v;
+    // `>= 0` y no `> 0`, que es lo que decía el comentario de arriba y lo que
+    // el código NO hacía: una caja que abre vacía es un hecho que hay que
+    // contar, no una ausencia. Sin el 0 no hay forma de distinguir "abrió con
+    // cero" de "se olvidó de decirlo", y el turno entero se queda sin base.
+    if (Number.isFinite(v) && v >= 0) out[cur] = v;
   }
   return out;
 }
