@@ -6,7 +6,7 @@
 // negocio con mala conectividad ese es exactamente el momento en que más se
 // cobra.
 //
-// La regla de la web es `localStock = max(0, stock - pendingQty)`. El móvil
+// La regla de la web es `localStock = stock - pendingQty`. Ambos clientes
 // usaba otra cosa, `old ? old.localStock : stock`, que falla justo en el caso
 // que importa: un producto NUEVO en el caché que ya tiene ventas offline
 // pendientes entra con el stock entero del servidor, así que la app ofrece de
@@ -24,14 +24,14 @@ export interface VentaParaStock {
 /**
  * El stock disponible para la venta.
  *
- * Nunca baja de cero: un descuadre de stock no puede fabricar mercancía
- * negativa, solo dejar de ofrecer más de lo que hay.
+ * Puede quedar negativo: las ventas reflejan mercancía que el cajero recibió
+ * físicamente aunque el traspaso aún no se haya sincronizado.
  */
 export function derivarLocalStock(stock: number, pendingQty: number): number {
   const s = Number(stock);
   const p = Number.isFinite(Number(pendingQty)) ? Number(pendingQty) : 0;
   if (!Number.isFinite(s)) return 0;
-  return Math.max(0, s - p);
+  return s - p;
 }
 
 /**

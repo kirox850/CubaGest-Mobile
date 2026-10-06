@@ -3,11 +3,15 @@ import { View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, Modal, S
 import { useFocusEffect } from '@react-navigation/native';
 import { TransfersAPI, LocationsAPI } from '../api/endpoints';
 import { useAuth } from '../context/AuthContext';
+import { isOfflineError } from '../api/client';
 import { colors, themeRef } from '../config/theme';
 import { Badge, EmptyState, ErrorBanner, showToast, SkeletonRows } from '../components/UI';
 import { showConfirm, showError } from '../components/dialogs';
 import Icon from '../components/Icon';
 import type { Location, LocationStockItem, Transfer } from '../types';
+import { cacheTransfers, getOfflineTransfers, getOfflineLocations, getOfflineProducts, enqueueOfflineOperation, getOfflineOperations } from '../offline/offlineStore';
+import { getActiveNamespace } from '../offline/namespace';
+import { generateUuid } from '../utils/uuid';
 
 const fmt = (n: number) => Number(n || 0).toFixed(2);
 const fmtDate = (d: string) =>
@@ -81,9 +85,23 @@ export default function TransferenciasScreen() {
       ]);
       setTransfers(trs);
       setLocations(locs);
+      void cacheTransfers(trs).catch(() => {});
       setLoading(false);
     } catch (e) {
-      setError((e as Error).message);
+      const [cached, cachedLocations, pendingOps] = await Promise.all([
+        getOfflineTransfers(), getOfflineLocations(), getOfflineOperations(['pending', 'syncing', 'conflict']),
+      ]);
+      const localTransfers = pendingOps.filter((op) => op.kind === 'transfer_create').map((op: any) => ({
+        id: op.payload.clientTransferId, companyId: user?.businessId || user?.company?.id || '',
+        fromLocationId: op.payload.fromLocationId || getActiveNamespace()?.locationId || '',
+        toLocationId: op.payload.toLocationId, requestedById: user?.id || '', status: 'pendiente',
+        notes: op.payload.notes, createdAt: new Date(op.payload.createdAt).toISOString(),
+        items: (op.payload.items || []).map((i: any) => ({ ...i, id: `${op.payload.clientTransferId}-${i.productId}`, transferId: op.payload.clientTransferId, productName: i.productName || i.name || '', unit: i.unit || 'ud' })),
+        syncStatus: op.status,
+      } as any));
+      setTransfers([...localTransfers, ...cached]);
+      setLocations(cachedLocations);
+      setError(cached.length || localTransfers.length ? 'Sin conexión — mostrando envíos guardados; los locales esperan sincronización.' : (e as Error).message);
       setLoading(false);
     }
   }, []);
@@ -100,13 +118,23 @@ export default function TransferenciasScreen() {
       setStockItems([]);
       return;
     }
-    const { items } = await LocationsAPI.stock(sourceId);
-    setStockItems(items.filter((p) => p.stock > 0));
+    try {
+      const { items } = await LocationsAPI.stock(sourceId);
+      setStockItems(items.filter((p) => p.stock > 0));
+    } catch (error) {
+      if (!isOfflineError(error) || getActiveNamespace()?.locationId !== sourceId) throw error;
+      const products = await getOfflineProducts();
+      setStockItems(products.filter((p) => p.localStock > 0).map((p) => ({ ...p, stock: p.localStock } as any)));
+    }
   };
 
   const openNew = async () => {
     try {
-      const locs = locations.length ? locations : await LocationsAPI.list();
+      let locs = locations;
+      if (!locs.length) {
+        try { locs = await LocationsAPI.list(); }
+        catch (error) { if (!isOfflineError(error)) throw error; locs = await getOfflineLocations(); }
+      }
       setLocations(locs);
       const own = ownLocationId(locs);
       const source = isAdmin ? '' : own;
@@ -139,14 +167,25 @@ export default function TransferenciasScreen() {
     if (selItems.length === 0) return showError('Agregue al menos un producto');
     setSaving(true);
     try {
-      await TransfersAPI.create({
+      const clientTransferId = generateUuid();
+      const createdAt = Date.now();
+      const body = {
         // El admin debe indicar el origen; los demás roles usan el suyo.
         fromLocationId: isAdmin ? fromLocationId : undefined,
         toLocationId,
-        items: selItems.map((i) => ({ productId: i.productId, qty: i.qty })),
+        items: selItems.map((i) => ({ productId: i.productId, qty: i.qty, productName: i.name })),
         notes: notes || undefined,
-      });
+        clientTransferId,
+        createdAt,
+      };
+      try {
+        await TransfersAPI.create(body);
+      } catch (error) {
+        if (!isOfflineError(error)) throw error;
+        await enqueueOfflineOperation('transfer_create', body, createdAt, clientTransferId);
+      }
       setModal(false);
+      showToast('Envío guardado. Al aprobarse, el movimiento respetará la hora en que se creó.', 'success');
       load();
     } catch (e) {
       showError((e as Error).message);
@@ -158,8 +197,12 @@ export default function TransferenciasScreen() {
   const approve = async (t: Transfer) => {
     if (!(await showConfirm('Se moverá el stock del origen al destino. ¿Continuar?'))) return;
     try {
-      await TransfersAPI.approve(t.id);
-      showToast('Envío aprobado', 'success');
+      try { await TransfersAPI.approve(t.id); }
+      catch (error) {
+        if (!isOfflineError(error)) throw error;
+        await enqueueOfflineOperation('transfer_resolve', { transferId: t.id, decision: 'approve' }, Date.now());
+      }
+      showToast('Aprobación guardada; el movimiento se sincronizará con la fecha de creación del envío.', 'success');
       load();
     } catch (e) {
       showError((e as Error).message);
@@ -170,7 +213,11 @@ export default function TransferenciasScreen() {
     if (!rejectTarget) return;
     setSaving(true);
     try {
-      await TransfersAPI.reject(rejectTarget.id, rejectReason || undefined);
+      try { await TransfersAPI.reject(rejectTarget.id, rejectReason || undefined); }
+      catch (error) {
+        if (!isOfflineError(error)) throw error;
+        await enqueueOfflineOperation('transfer_resolve', { transferId: rejectTarget.id, decision: 'reject', reason: rejectReason || undefined }, Date.now());
+      }
       setRejectTarget(null);
       setRejectReason('');
       load();
@@ -477,4 +524,3 @@ export const styles = new Proxy({} as ReturnType<typeof createStyles>, {
     return __styles[prop as keyof ReturnType<typeof createStyles>];
   },
 });
-

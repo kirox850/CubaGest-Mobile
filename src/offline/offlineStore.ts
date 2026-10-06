@@ -34,7 +34,7 @@ import {
 } from './namespace';
 import { derivarLocalStock, pendingQtyPorProducto } from './localStock';
 import { generateUuid, isUuid } from '../utils/uuid';
-import type { Location, InventoryReading, Sale, Closing, CashMovement } from '../types';
+import type { Location, InventoryReading, Sale, Closing, CashMovement, Transfer } from '../types';
 
 export type SyncStatus = 'pending' | 'syncing' | 'synced' | 'conflict';
 
@@ -58,6 +58,17 @@ export interface OfflineSaleItem {
   qty: number;
   price: number;
   total: number;
+  discountId?: string;
+  discountAmount?: number;
+}
+
+export interface OfflinePayment {
+  method: string;
+  currency: string;
+  amount: number;
+  exchangeRate?: number | null;
+  rateSource?: 'same_currency' | 'automatic' | 'manual';
+  rateUpdatedAt?: number | string | null;
 }
 
 export interface OfflineSale {
@@ -76,11 +87,14 @@ export interface OfflineSale {
   clientNit: string;
   clientPhone?: string;
   payMethod: string;
+  payments?: OfflinePayment[];
   items: OfflineSaleItem[];
   subtotal: number;
+  tax?: number;
   total: number;
   currency?: string;     // moneda de la venta (CUP/USD/EUR/MLC)
-  discountId?: string;   // descuento de tipo venta (solo online)
+  discountId?: string;
+  saleDiscountAmount?: number;
   conflictReason?: string;
   lastError?: string;    // último error de sync (reintentable)
   syncedAt?: number;
@@ -93,6 +107,18 @@ export interface SyncLogEntry {
   salesConflict: number;
   salesUnknown?: number;
   error?: string;
+}
+
+export type OfflineOperationKind = 'shift_open' | 'shift_close' | 'manual_reading' | 'closing_confirm' | 'transfer_create' | 'transfer_resolve' | 'cash_movement' | 'expense';
+export interface OfflineOperation {
+  clientOperationId: string;
+  kind: OfflineOperationKind;
+  businessAt: number;
+  payload: Record<string, any>;
+  status: SyncStatus;
+  createdAt: number;
+  lastError?: string;
+  serverResult?: Record<string, any>;
 }
 
 interface Meta {
@@ -157,6 +183,104 @@ async function putMeta(patch: Partial<Meta>): Promise<void> {
 export async function getLastProductSync(): Promise<number | null> {
   if (!activeKeys()) return null;
   return (await getMeta()).lastProductSync;
+}
+
+export interface OfflineCartSnapshot {
+  locationId: string;
+  cart: Record<string, number>;
+  lineDiscounts: Record<string, string>;
+  saleCurrency: string;
+  paymentLines: any[];
+  saleDiscountId: string;
+  clientName: string;
+  clientNit: string;
+  clientPhone: string;
+  updatedAt: number;
+}
+
+function cartKey(): string {
+  const namespace = getActiveNamespace();
+  if (!namespace) throw new NoNamespaceError();
+  return accountScopedKey('pos_cart', namespace.companyId, namespace.userId);
+}
+
+export async function getOfflineCart(locationId: string): Promise<OfflineCartSnapshot | null> {
+  if (!activeKeys()) return null;
+  const rows = await readJSON<Record<string, OfflineCartSnapshot>>(cartKey(), {});
+  return rows[locationId] || null;
+}
+
+export async function saveOfflineCart(snapshot: OfflineCartSnapshot): Promise<void> {
+  await serialize(async () => {
+    const key = cartKey();
+    const rows = await readJSON<Record<string, OfflineCartSnapshot>>(key, {});
+    rows[snapshot.locationId] = snapshot;
+    await writeJSON(key, rows);
+  });
+}
+
+export async function clearOfflineCart(locationId: string): Promise<void> {
+  if (!activeKeys()) return;
+  await serialize(async () => {
+    const key = cartKey();
+    const rows = await readJSON<Record<string, OfflineCartSnapshot>>(key, {});
+    delete rows[locationId];
+    await writeJSON(key, rows);
+  });
+}
+
+function operationsKey(): string {
+  const namespace = getActiveNamespace();
+  if (!namespace) throw new NoNamespaceError();
+  return accountScopedKey('operations', namespace.companyId, namespace.userId);
+}
+
+export async function enqueueOfflineOperation(
+  kind: OfflineOperationKind,
+  payload: Record<string, any>,
+  businessAt = Date.now(),
+  clientOperationId = generateUuid(),
+): Promise<OfflineOperation> {
+  return serialize(async () => {
+    const key = operationsKey();
+    const operations = await readJSON<OfflineOperation[]>(key, []);
+    const existing = operations.find((op) => op.clientOperationId === clientOperationId);
+    if (existing) return existing;
+    const operation: OfflineOperation = {
+      clientOperationId, kind, businessAt, payload, status: 'pending', createdAt: Date.now(),
+    };
+    await writeJSON(key, [...operations, operation]);
+    return operation;
+  });
+}
+
+export async function getOfflineOperations(statuses: SyncStatus[] = ['pending']): Promise<OfflineOperation[]> {
+  if (!activeKeys()) return [];
+  const rows = await readJSON<OfflineOperation[]>(operationsKey(), []);
+  return rows.filter((op) => statuses.includes(op.status)).sort((a, b) => a.businessAt - b.businessAt);
+}
+
+export async function updateOfflineOperation(
+  clientOperationId: string,
+  status: SyncStatus,
+  patch: Partial<Pick<OfflineOperation, 'lastError' | 'serverResult'>> = {},
+): Promise<void> {
+  if (!activeKeys()) return;
+  await serialize(async () => {
+    const key = operationsKey();
+    const rows = await readJSON<OfflineOperation[]>(key, []);
+    const index = rows.findIndex((op) => op.clientOperationId === clientOperationId);
+    if (index < 0) return;
+    rows[index] = { ...rows[index], ...patch, status };
+    if (status === 'synced') rows[index].lastError = undefined;
+    await writeJSON(key, rows);
+  });
+}
+
+export async function recoverStuckOfflineOperations(): Promise<number> {
+  const all = await getOfflineOperations(['syncing']);
+  for (const operation of all) await updateOfflineOperation(operation.clientOperationId, 'pending');
+  return all.length;
 }
 
 // ── Productos ───────────────────────────────────────────────────────────────
@@ -238,7 +362,7 @@ async function adjustLocalStock(deltas: Record<string, number>): Promise<void> {
     for (const [id, d] of Object.entries(deltas)) {
       const p = map[id];
       if (p) {
-        p.localStock = Math.max(0, p.localStock + d);
+        p.localStock += d;
       }
     }
     await writeJSON(keys.products, map);
@@ -301,7 +425,7 @@ export async function saveSaleOffline(
     const map = await readJSON<Record<string, OfflineProduct>>(keys.products, {});
     for (const [id, d] of Object.entries(deltas)) {
       const p = map[id];
-      if (p) p.localStock = Math.max(0, p.localStock + d);
+      if (p) p.localStock += d;
     }
     await writeJSON(keys.products, map);
 
@@ -601,6 +725,8 @@ export const getOfflineContabilidad = () => getOfflineDoc<Record<string, unknown
 // Descuentos aplicables a una venta.
 export const cacheDiscounts = (d: any[]) => cacheList<any>('discounts', d);
 export const getOfflineDiscounts = (): Promise<any[]> => readList<any>('discounts');
+export const cacheTransfers = (transfers: Transfer[]) => cacheList<Transfer>('transfers', transfers);
+export const getOfflineTransfers = (): Promise<Transfer[]> => readList<Transfer>('transfers');
 
 // ── Última ubicación conocida ────────────────────────────────────────────────
 // No es un almacén nuevo: delega en la pista que YA existe en namespace.ts

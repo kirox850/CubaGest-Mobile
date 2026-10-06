@@ -28,11 +28,12 @@ import {
   cacheSales,
   cacheSettings,
   cacheDiscounts,
+  cacheTransfers,
   getLastLocationId,
 } from './offlineStore';
 import {
   LocationsAPI, ClosingAPI, CashMovementsAPI,
-  SalesAPI, SettingsAPI, DiscountsAPI, ShiftAPI,
+  SalesAPI, SettingsAPI, DiscountsAPI, ShiftAPI, TransfersAPI,
 } from '../api/endpoints';
 import { persistShift } from '../hooks/useShift';
 import type { User } from '../types';
@@ -131,6 +132,7 @@ export async function warmCache(opts: WarmOpts): Promise<WarmResult> {
     paso('ventas', async () => { await cacheSales(await SalesAPI.list()); }),
     paso('ajustes', async () => { await cacheSettings(await SettingsAPI.get()); }),
     paso('descuentos', async () => { await cacheDiscounts(await DiscountsAPI.list()); }),
+    paso('traspasos', async () => { await cacheTransfers(await TransfersAPI.list()); }),
   ]);
   resto.forEach(registrar);
 

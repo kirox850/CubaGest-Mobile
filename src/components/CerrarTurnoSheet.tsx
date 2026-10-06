@@ -3,6 +3,8 @@ import { View, Text, Modal, ScrollView, Pressable, TouchableOpacity } from 'reac
 import { colors } from '../config/theme';
 import { Btn, Inp, showToast } from './UI';
 import { ClosingAPI } from '../api/endpoints';
+import { isOfflineError } from '../api/client';
+import { getOfflineProducts } from '../offline/offlineStore';
 
 /**
  * Contar y cerrar el turno.
@@ -17,11 +19,13 @@ import { ClosingAPI } from '../api/endpoints';
  * conciliar.
  */
 export default function CerrarTurnoSheet({
-  visible, openingReadingId, locationName, onCerrar, onCancel,
+  visible, openingReadingId, locationName, baseCash, onConfirm, onCerrar, onCancel,
 }: {
   visible: boolean;
   openingReadingId: string;
   locationName: string;
+  baseCash?: Record<string, number>;
+  onConfirm: (payload: { items: any[]; countedCash: Record<string, number>; notes?: string; countedAt: string }) => Promise<void>;
   onCerrar: () => void;
   onCancel: () => void;
 }) {
@@ -52,13 +56,22 @@ export default function CerrarTurnoSheet({
           ? Object.keys(base).map((k) => ({ cur: k, valor: String(base[k] ?? '') }))
           : [{ cur: 'CUP', valor: '' }]);
       } catch (e) {
-        showToast('No se pudo cargar la caja: ' + (e as Error).message, 'error');
+        if (isOfflineError(e)) {
+          const cached = await getOfflineProducts();
+          if (vivo && cached.length) {
+            setConteo(cached.map((p) => ({ productId: p.id, productName: p.name, esperado: Number(p.localStock) || 0, contado: Number(p.localStock) || 0 })));
+            const base = baseCash || {};
+            setMonedas(Object.keys(base).length
+              ? Object.keys(base).map((k) => ({ cur: k, valor: String(base[k] ?? '') }))
+              : [{ cur: 'CUP', valor: '' }]);
+          } else if (vivo) showToast('No hay productos guardados para contar esta caja.', 'error');
+        } else showToast('No se pudo cargar la caja: ' + (e as Error).message, 'error');
       } finally {
         if (vivo) setCargando(false);
       }
     })();
     return () => { vivo = false; };
-  }, [visible, openingReadingId]);
+  }, [visible, openingReadingId, baseCash]);
 
   if (!visible) return null;
 
@@ -70,10 +83,10 @@ export default function CerrarTurnoSheet({
     }
     setGuardando(true);
     try {
-      const { ShiftAPI } = await import('../api/endpoints');
-      await ShiftAPI.end({
+      await onConfirm({
         items: conteo.map((x) => ({ productId: x.productId, stockValidated: Number(x.contado) || 0 })),
         countedCash,
+        countedAt: new Date().toISOString(),
       });
       onCerrar();
     } catch (e) {

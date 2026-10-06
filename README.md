@@ -16,7 +16,7 @@ local) y todo lo demás lo decide el servidor. Los cálculos del servidor están
 documentados en el backend, no aquí.
 
 - Entry point: `index.js` → `registerRootComponent(App)` → `src/App.tsx`
-- Estado de verificación de este README: typecheck limpio, **259 tests / 27
+- Estado de verificación de este README: typecheck limpio, **261 tests / 27
   suites en verde**.
 
 ---
@@ -93,7 +93,7 @@ Scripts literales de `package.json`:
 | **Añadir una dependencia** | `npx expo install <pkg>` | **Obligatorio.** Ver §2.1 |
 | Correr | `npm start` (= `expo start`) | Levanta Metro, escaneas el QR con Expo Go |
 | Correr en emulador | `npm run android` / `npm run ios` | Necesita emulador/simulador |
-| Tests | `npm test` (= `jest`) | 27 suites / 259 tests |
+| Tests | `npm test` (= `jest`) | 27 suites / 261 tests |
 | Tests en modo CI | `npx jest --ci` | Sin watch, un solo pase |
 | Un test | `npx jest src/config/__tests__/configuracion.test.ts` | |
 | Tipos | `npm run typecheck` | `tsc --noEmit`, limpio hoy |
@@ -282,7 +282,7 @@ Es el fichero con más "por qué" del repo. Estructura:
 1. **Listas** — `NAV_ITEMS` (7 módulos, misma key/label/icono que la web),
    `MENU_SCREENS` (hoy solo `movimientos`), `PREFERIDAS_BARRA` (5 destinos),
    `MAX_TABS`.
-2. **`HeaderRight`** — píldoras de estado (offline, sync, conflictos), avatar,
+2. **`HeaderRight`** — bandeja de notificaciones, píldoras de estado (offline, sync, conflictos), avatar,
    y el **menú de perfil** (modal con Configuración, módulos desbordados,
    Entradas y Salidas, tour, modo oscuro, legales y cerrar sesión).
 3. **`TrialBanner`** — banner de prueba gratuita: azul
@@ -386,7 +386,7 @@ snapshot JSON por colección y **escritor serializado** por cola de promesas).
 | `offlineStore.ts` | Store completo (638 líneas): colecciones, cola de ventas, caché |
 | `namespace.ts` | Todo lo offline vive bajo `companyId + userId + locationId` |
 | `syncManager.ts` | `POST /sales/sync`, los 3 invariantes (§10) |
-| `localStock.ts` | `localStock = max(0, stock − pendingQty)` |
+| `localStock.ts` | `localStock = stock − pendingQty`; puede ser negativo en ventas |
 | `syncCycle.ts` | La condición de la pasada periódica (5 min) |
 | `warmCache.ts` | Baja **todas** las colecciones al entrar, sin visitar pantallas |
 
@@ -889,15 +889,20 @@ Componentes que hacen de pantalla pero viven en `components/`:
 
 ## 10. Modo offline
 
-La app es **offline-first**, no "tolerante a cortes":
+La app es **offline-first**, no "tolerante a cortes". Las operaciones quedan
+separadas por empresa, usuario y ubicación, conservan su hora de negocio y llevan
+un identificador para que reintentar no duplique ventas ni movimientos.
 
 - **Vender sin red** guarda la venta en la cola local con folio temporal
   (`LOCAL-0001`, …), descuenta el stock local y avisa con la franja "MODO
   OFFLINE" (color `colors.syncBusy`; el README anterior la llamaba *morada* y
   es azul petróleo).
-- **`localStock = max(0, stockDelServidor − pendienteDeEsteDispositivo)`**
-  (`offline/localStock.ts`). Sin esa resta la app ofrece mercancía ya vendida,
-  que es justo lo que pasa en un mostrador con mala cobertura.
+- **`localStock = stockDelServidor − pendienteDeEsteDispositivo`**
+  (`offline/localStock.ts`). Para ventas se permite que el resultado sea cero o
+  negativo: el cajero puede tener mercancía que todavía no aparece en el sistema
+  porque el traspaso o entrada física no se ha sincronizado. El negativo queda
+  visible para que el conteo y el recálculo lo resuelvan; no habilita enviar
+  mercancía inexistente en un traspaso.
 - **Sincronización** (`POST /sales/sync`) en cinco momentos: arranque con
   internet, volver a primer plano, reconexión de red, acción manual y cada 5
   minutos con la app en primer plano.
@@ -916,6 +921,24 @@ La app es **offline-first**, no "tolerante a cortes":
 - **Warm cache** (`offline/warmCache.ts`): al entrar se baja **todo** de una
   vez. Antes la caché nacía de rebote y un cajero que perdía la conexión a los
   dos minutos tenía el POS vacío.
+- **Carrito y operaciones**: el carrito pendiente se conserva localmente; también
+  se encolan aperturas/cierres, lecturas, traspasos, retiros y gastos. La cola se
+  ordena por fecha de negocio y una operación en conflicto frena las posteriores
+  hasta que se resuelva, sin borrar el trabajo pendiente.
+- **Pago mixto y descuentos**: una factura puede combinar métodos y monedas. La
+  tasa automática cacheada se recomienda primero cuando esté activada, con opción
+  de tasa manual por venta; el detalle aplicado se conserva. Un descuento cuyo
+  máximo se exceda por ventas offline no invalida esas ventas: al sincronizar se
+  registra el uso y se desactiva para ventas posteriores.
+- **Anulación y traspaso**: anular una factura devuelve el inventario en la fecha
+  original de la venta para que el recálculo corrija las fotos históricas; no
+  aumenta directamente el stock presente. Un traspaso aprobado se contabiliza
+  desde su hora de creación, guarda aparte la aprobación y, si se rechaza, no
+  genera movimiento.
+- **Avisos**: la campanita muestra la bandeja interna y sus estados. El push del
+  sistema móvil necesita un identificador de proyecto EAS y credenciales de
+  Apple/Google configurados para el lanzamiento; la bandeja interna no depende
+  de esa configuración.
 - **Conectividad = dos señales** (`config/conectividad.ts`): NetInfo (avisa de
   la antena) **y** una sonda al servidor (detecta el wifi que se asocia y no
   lleva a ningún sitio — el caso real del negocio). La sonda es `fetch` **crudo**
@@ -1171,7 +1194,7 @@ npx jest --ci --listTests      # 27 rutas
 npx jest src/config/__tests__/configuracion.test.ts
 ```
 
-**Estado verificado hoy: 27 suites, 259 tests, 27/27 en verde (~14 s).**
+**Estado verificado el 6 de octubre de 2026: 27 suites, 261 tests, 27/27 en verde.**
 
 | Suite | Tests | Qué fija |
 |---|---|---|
@@ -1179,13 +1202,13 @@ npx jest src/config/__tests__/configuracion.test.ts
 | `api/session` | 20 | almacenamiento, refresh silencioso, 401, logout, `revalidateSession` |
 | `config/movimientoDinero` | 13 | validación de entradas/salidas, quién aprueba |
 | `config/escalas` | 13 | que todo spacing/tipo/radio venga de la escala |
-| `offline/syncManager` | 12 | los 3 invariantes del sync |
+| `offline/syncManager` | 14 | invariantes, orden temporal y conflicto como barrera |
 | `hooks/useShift` | 12 | contrato de `assignedCajas`, respaldo sin conexión |
 | `config/tolerancia` | 12 | porcentaje 0–100, absoluto con tope de 9 dígitos |
 | `config/ventanaCierre` | 11 | `number \| false \| null` |
 | `config/roles` | 11 | matriz de roles + contrato de users y transfers |
 | `config/badge` | 11 | `danger` de `Btn` y `color + '20'` |
-| `offline/localStock` | 10 | `max(0, stock − pending)` |
+| `offline/localStock` | 10 | resta de ventas pendientes, admite stock negativo |
 | `config/mergeSales` | 10 | la local gana al colisionar |
 | `config/conectividad` | 10 | dos señales, sonda cruda |
 | `config/locationResolution` | 9 | orden de resolución y `cajasParaVender` |
@@ -1397,9 +1420,10 @@ Ordenada por lo que más cuesta si se deja.
 4. **`src/types/index.ts` con 32 interfaces** escritas contra lo que el backend
    devuelve hoy, no generadas desde el esquema. Cuando el backend cambie una
    forma, el typecheck no avisa.
-5. **Dependencias declaradas y sin usar**: `expo-device` y `expo-notifications`
-   están en `package.json` pero **ningún fichero de `src/` las importa**.
-   (`expo-splash-screen` sí se usa, por su plugin de `app.json`.)
+5. **Push nativo requiere configuración de lanzamiento**: `expo-device` y
+   `expo-notifications` ya se usan para permisos y registro de tokens. La bandeja
+   interna está disponible, pero las notificaciones del sistema requieren
+   `extra.eas.projectId` y credenciales de Apple/Google válidas para el build.
 6. **`eslint` sin configuración** y `prettier` declarado sin config (§15.2).
 7. **Sin CI de tests en cada push**: el workflow solo corre a mano, para no
    gastar minutos de Gradle. Las compuertas (`tsc` + `jest`) existen, pero solo

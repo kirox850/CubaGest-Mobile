@@ -53,18 +53,22 @@ export function canAccess(role: string | undefined, module: string): boolean {
 }
 
 // Labels idénticos a los de la web (constants.ts)
-export const PAY_METHODS = [
-  { id: 'efectivo', label: 'Efectivo' },
-  { id: 'transferencia', label: 'Transferencia' },
-  { id: 'usd', label: 'USD (efectivo)' },
-  { id: 'clasica', label: 'Clásica' },
-  { id: 'zelle', label: 'Zelle' },
-  { id: 'mlc', label: 'MLC' },
-  { id: 'eur', label: 'EUR (efectivo)' },
-];
+export const PAYMENT_METHODS_BY_CURRENCY: Record<string, { id: string; label: string }[]> = {
+  CUP: [{ id: 'efectivo', label: 'Efectivo' }, { id: 'transferencia', label: 'Transferencia' }],
+  USD: [
+    { id: 'efectivo', label: 'Efectivo' }, { id: 'zelle', label: 'Zelle' },
+    { id: 'clasica', label: 'Clásica' }, { id: 'usdt', label: 'USDT' }, { id: 'ach', label: 'ACH' },
+  ],
+  EUR: [{ id: 'efectivo', label: 'Efectivo' }, { id: 'transferencia', label: 'Transferencia' }],
+  CAD: [{ id: 'efectivo', label: 'Efectivo' }, { id: 'transferencia', label: 'Transferencia' }],
+  MLC: [{ id: 'transferencia', label: 'Transferencia' }],
+};
+export const PAY_METHODS = Object.values(PAYMENT_METHODS_BY_CURRENCY)
+  .flat()
+  .filter((method, index, all) => all.findIndex((x) => x.id === method.id) === index);
 
-export const CURRENCIES = ['CUP', 'USD', 'EUR', 'MLC'];
-export const CURRENCY_SYMBOLS: Record<string, string> = { CUP: '$', USD: '$', EUR: '€', MLC: 'MLC' };
+export const CURRENCIES = ['CUP', 'USD', 'EUR', 'CAD', 'MLC'];
+export const CURRENCY_SYMBOLS: Record<string, string> = { CUP: '$', USD: '$', EUR: '€', CAD: 'CA$', MLC: 'MLC' };
 
 // Categorías y unidades — mismas listas que la web
 export const CATEGORIES = ['Alimentos', 'Higiene', 'Bebidas', 'Limpieza', 'Electrónica', 'Ropa', 'Otros'];

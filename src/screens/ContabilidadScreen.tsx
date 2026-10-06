@@ -4,13 +4,15 @@ import { useFocusEffect } from '@react-navigation/native';
 import { AccountingAPI, ExpensesAPI } from '../api/endpoints';
 import { useAuth } from '../context/AuthContext';
 import { colors, themeRef } from '../config/theme';
-import { PAY_METHODS, EXPENSE_CATS } from '../config/roles';
+import { PAY_METHODS, EXPENSE_CATS, CURRENCIES, CURRENCY_SYMBOLS } from '../config/roles';
 import { EmptyState, ErrorBanner, Badge, Btn, Inp, Sel, PageHeader, Skeleton, SkeletonRows } from '../components/UI';
 import Icon from '../components/Icon';
 import { shareCSV } from '../utils/csv';
 import type { AccountingSummary, IncomeRow, Expense } from '../types';
 import { showError } from '../components/dialogs';
-import { cacheContabilidad, getOfflineContabilidad } from '../offline/offlineStore';
+import { cacheContabilidad, getOfflineContabilidad, enqueueOfflineOperation, getOfflineOperations } from '../offline/offlineStore';
+import { isOfflineError } from '../api/client';
+import { generateUuid } from '../utils/uuid';
 
 const fmt = (n: number) => Number(n || 0).toFixed(2);
 const today = () => new Date().toISOString().split('T')[0];
@@ -24,7 +26,8 @@ export default function ContabilidadScreen() {
   const [error, setError] = useState('');
   const [modal, setModal] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ date: today(), concept: '', amount: '', category: 'Compras', method: 'efectivo' });
+  const [form, setForm] = useState({ date: today(), concept: '', amount: '', category: 'Compras', method: 'efectivo', currency: 'CUP', fundingSource: 'caja_fuerte' as 'caja_fuerte' | 'otra' });
+  const [treasury, setTreasury] = useState<Record<string, number>>({});
   // Informe Fiscal en-app (paridad con la web): capa a pantalla completa con
   // botón "← Volver" — nunca una pestaña huérfana.
   const [showInforme, setShowInforme] = useState(false);
@@ -38,15 +41,17 @@ export default function ContabilidadScreen() {
       setError('');
       // Usa el summary contable del backend (paridad con la web) en lugar de
       // recalcular localmente sobre la lista completa de ventas.
-      const [sum, inc, exp] = await Promise.all([
+      const [sum, inc, exp, vault] = await Promise.all([
         AccountingAPI.summary(),
         AccountingAPI.income(),
         ExpensesAPI.list(),
+        AccountingAPI.treasury(),
       ]);
       setSummary(sum);
       setIncome(inc);
       setExpenses(exp);
-      void cacheContabilidad({ sum, inc, exp }).catch(() => {});
+      setTreasury(vault?.balances || {});
+      void cacheContabilidad({ sum, inc, exp, treasury: vault?.balances || {} }).catch(() => {});
     } catch (err) {
       // Sin red se enseña el último resumen guardado, marcado como tal. Un saldo
       // contable sin avisar de que es viejo se lee como el saldo de hoy, que es justo
@@ -56,6 +61,14 @@ export default function ContabilidadScreen() {
         setSummary(local.sum as AccountingSummary);
         setIncome(local.inc as IncomeRow[]);
         setExpenses(local.exp as Expense[]);
+        setTreasury((local.treasury as Record<string, number>) || {});
+        const queued = await getOfflineOperations(['pending', 'syncing', 'conflict']);
+        const pendingExpenses = queued.filter((op) => op.kind === 'expense').map((op: any) => ({
+          id: op.payload.clientExpenseId, date: op.payload.date, concept: op.payload.concept,
+          amount: op.payload.amount, category: op.payload.category, method: op.payload.method,
+          currency: op.payload.currency, offlinePending: true,
+        } as any));
+        setExpenses([...(local.exp as Expense[]), ...pendingExpenses]);
         setError('Sin conexión con el servidor — mostrando el resumen guardado en este dispositivo');
       } else {
         setError((err as Error).message);
@@ -72,12 +85,19 @@ export default function ContabilidadScreen() {
   const net = summary ? Number(summary.netProfit) : totalIncome - totalExp;
 
   const addExpense = async () => {
-    if (!form.concept || !form.amount) return showError('Complete concepto y monto');
+    if (!form.concept || !form.amount || Number(form.amount) <= 0) return showError('Complete concepto y monto válido');
     setSaving(true);
     try {
-      await ExpensesAPI.create({ ...form, amount: Number(form.amount) });
+      const businessAt = new Date(`${form.date}T12:00:00`).toISOString();
+      const body = { ...form, amount: Number(form.amount), businessAt, clientExpenseId: generateUuid() };
+      try {
+        await ExpensesAPI.create(body);
+      } catch (error) {
+        if (!isOfflineError(error)) throw error;
+        await enqueueOfflineOperation('expense', body, Date.parse(businessAt), body.clientExpenseId);
+      }
       setModal(false);
-      setForm({ date: today(), concept: '', amount: '', category: 'Compras', method: 'efectivo' });
+      setForm({ date: today(), concept: '', amount: '', category: 'Compras', method: 'efectivo', currency: 'CUP', fundingSource: 'caja_fuerte' });
       load();
     } catch (e) {
       showError((e as Error).message);
@@ -136,7 +156,7 @@ export default function ContabilidadScreen() {
         <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
           <Btn variant="secondary" icon="refresh" label="Actualizar" onPress={load} />
           <Btn variant="secondary" icon="print" label="Informe Fiscal" onPress={() => setShowInforme(true)} />
-          <Btn icon="plus" label="Registrar Gasto" onPress={() => setModal(true)} />
+          <Btn icon="plus" label="Registrar gasto de empresa" onPress={() => setModal(true)} />
         </View>
       </View>
 
@@ -164,6 +184,12 @@ export default function ContabilidadScreen() {
               </View>
             ))}
           </View>
+          <View style={styles.summaryBox}>
+            <Text style={styles.summaryTitle}>Caja fuerte · saldo por moneda</Text>
+            {Object.keys(treasury).length
+              ? Object.entries(treasury).map(([currency, balance]) => <View key={currency} style={styles.summaryRow}><Text style={styles.summaryLabel}>{currency}</Text><Text style={styles.summaryValue}>{CURRENCY_SYMBOLS[currency] || ''}{fmt(Number(balance))}</Text></View>)
+              : <Text style={styles.informeEmpty}>Sin movimientos confirmados</Text>}
+          </View>
           <Skeleton h={48} r={14} />
         </ScrollView>
         ) : (
@@ -185,7 +211,7 @@ export default function ContabilidadScreen() {
             ))}
           </View>
           <TouchableOpacity style={styles.addBtn} onPress={() => setModal(true)}>
-            <Text style={styles.addBtnText}>+ Registrar Egreso</Text>
+            <Text style={styles.addBtnText}>+ Registrar gasto de empresa</Text>
           </TouchableOpacity>
         </ScrollView>
         )
@@ -246,10 +272,13 @@ export default function ContabilidadScreen() {
         <Modal visible animationType="slide" transparent onRequestClose={() => setModal(false)}>
           <View style={styles.modalBg}>
             <View style={styles.modalCard}>
-              <Text style={styles.modalTitle}>Registrar Egreso</Text>
+              <Text style={styles.modalTitle}>Registrar gasto de empresa</Text>
               <Inp style={{ marginBottom: 10 }} value={form.date} onChangeText={v => setForm(f => ({ ...f, date: v }))} placeholder="Fecha (YYYY-MM-DD)" />
               <Inp style={{ marginBottom: 10 }} value={form.concept} onChangeText={v => setForm(f => ({ ...f, concept: v }))} placeholder="Concepto *" />
-              <Inp style={{ marginBottom: 10 }} value={form.amount} onChangeText={v => setForm(f => ({ ...f, amount: v }))} placeholder="Monto CUP *" keyboardType="decimal-pad" />
+              <View style={{ flexDirection: 'row', gap: 8, marginBottom: 10 }}>
+                <Inp style={{ flex: 1 }} value={form.amount} onChangeText={v => setForm(f => ({ ...f, amount: v }))} placeholder="Monto *" keyboardType="decimal-pad" />
+                <View style={{ width: 110 }}><Sel value={form.currency} onValueChange={v => setForm(f => ({ ...f, currency: v }))} items={CURRENCIES.map(c => ({ label: c, value: c }))} /></View>
+              </View>
               {/* Método y categoría — selects nativos, igual que la web */}
               <View style={{ marginBottom: 10 }}>
                 <Text style={styles.fieldLabel}>Método de pago</Text>
@@ -266,6 +295,13 @@ export default function ContabilidadScreen() {
                   onValueChange={(v: string) => setForm(f => ({ ...f, category: v }))}
                   items={EXPENSE_CATS.map(c => ({ label: c, value: c }))}
                 />
+              </View>
+              <View style={{ marginBottom: 10 }}>
+                <Text style={styles.fieldLabel}>Origen de los fondos</Text>
+                <Sel value={form.fundingSource} onValueChange={v => setForm(f => ({ ...f, fundingSource: v as 'caja_fuerte' | 'otra' }))} items={[
+                  { label: 'Caja fuerte de la empresa', value: 'caja_fuerte' },
+                  { label: 'Otra fuente (no descontar de caja fuerte)', value: 'otra' },
+                ]} />
               </View>
               <View style={styles.modalActions}>
                 <TouchableOpacity style={styles.btnSecondary} onPress={() => setModal(false)}>
@@ -353,4 +389,3 @@ export const styles = new Proxy({} as ReturnType<typeof createStyles>, {
     return __styles[prop as keyof ReturnType<typeof createStyles>];
   },
 });
-

@@ -1,6 +1,7 @@
 import React, { useCallback, useState } from 'react';
-import { View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, ScrollView, DeviceEventEmitter } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
+import { isOfflineError } from '../api/client';
 import { LocationsAPI, SalesAPI, SettingsAPI, DiscountsAPI } from '../api/endpoints';
 import { useShift } from '../hooks/useShift';
 import { useLocations } from '../hooks/useLocations';
@@ -9,12 +10,14 @@ import ShiftSheet, { ShiftBadge } from '../components/ShiftSheet';
 import { useAuth } from '../context/AuthContext';
 import { useSync } from '../context/SyncContext';
 import { colors, themeRef } from '../config/theme';
-import { PAY_METHODS, CURRENCY_SYMBOLS } from '../config/roles';
+import { PAYMENT_METHODS_BY_CURRENCY, CURRENCY_SYMBOLS } from '../config/roles';
 import { EmptyState, ErrorBanner, Sel, Inp, Field, Skeleton, showToast } from '../components/UI';
 import { showConfirm, showError } from '../components/dialogs';
 import Icon from '../components/Icon';
 import {
-  cacheProducts, getOfflineProducts, saveSaleOffline,
+  cacheProducts, getOfflineProducts, saveSaleOffline, cacheSettings, getOfflineSettings,
+  cacheDiscounts, getOfflineDiscounts, getAllOfflineSales,
+  getOfflineCart, saveOfflineCart, clearOfflineCart, type OfflineCartSnapshot,
 } from '../offline/offlineStore';
 import { activateNamespace, getActiveNamespace, UNKNOWN_LOCATION } from '../offline/namespace';
 import { generateUuid } from '../utils/uuid';
@@ -63,11 +66,15 @@ export default function POSScreen() {
   const [pidiendoCierre, setPidiendoCierre] = useState(false);
   const [search, setSearch] = useState('');
   const [cart, setCart] = useState<Record<string, number>>({});
-  const [payMethod, setPayMethod] = useState('efectivo');
+  const [cartRestore, setCartRestore] = useState<OfflineCartSnapshot | null>(null);
+  const [cartReady, setCartReady] = useState(false);
+  const restoredCartLocation = React.useRef('');
+  const [paymentLines, setPaymentLines] = useState<any[]>([
+    { id: 'payment-1', method: 'efectivo', currency: 'CUP', amount: '', rateSource: 'automatic', exchangeRate: '' },
+  ]);
   const [clientName, setClientName] = useState('');
   const [clientNit, setClientNit] = useState('');
   const [clientPhone, setClientPhone] = useState('');
-  const [cashGiven, setCashGiven] = useState('');
   const [error, setError] = useState('');
   const [cargandoCatalogo, setCargandoCatalogo] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -75,12 +82,14 @@ export default function POSScreen() {
   const [saleCurrency, setSaleCurrency] = useState('CUP');
   const [currencies, setCurrencies] = useState<string[]>(['CUP']);
   const [discounts, setDiscounts] = useState<any[]>([]);
+  const [rateSettings, setRateSettings] = useState<any>({ rateMode: 'manual', rates: {}, manualRates: {}, taxRate: 0 });
+  const [localDiscountUsage, setLocalDiscountUsage] = useState<Record<string, number>>({});
   const [saleDiscountId, setSaleDiscountId] = useState('');
-  // Descuento por producto: un descuento por línea (productId → discountId),
-  // solo se envía en ventas online (el backend lo valida y aplica).
+  // Descuento por producto: se guarda el mismo precio/descuento para sincronizar
+  // una venta offline sin cambiar lo que aceptó el cajero.
   const [lineDiscounts, setLineDiscounts] = useState<Record<string, string>>({});
 
-  const needsTransfer = payMethod === 'transferencia';
+  const needsTransfer = paymentLines.some((p) => p.method === 'transferencia');
   // El admin no tiene turno propio por defecto: el backend exige que indique en
   // cuál vende. Pero en cuanto ABRE turno, la caja la dicta el turno y se
   // ofrece el selector solo cuando no hay ninguno — si no, el admin cambiaría
@@ -116,14 +125,53 @@ export default function POSScreen() {
     }
   }, [user?.role, cargandoTurno, shift, avisoTurno, cajas]);
 
-  // Config de empresa (monedas habilitadas) y descuentos disponibles
+  // La última configuración y descuentos descargados permiten vender con las
+  // mismas monedas, tasas y promociones si se pierde internet.
   React.useEffect(() => {
-    if (!online) return;
-    SettingsAPI.get().then((s: any) => {
-      if (s?.currencies?.length) setCurrencies(s.currencies);
-    }).catch(() => {});
-    DiscountsAPI.list().then((d: any[]) => setDiscounts(d || [])).catch(() => {});
+    let mounted = true;
+    (async () => {
+      const [cachedSettings, cachedDiscounts, localSales] = await Promise.all([
+        getOfflineSettings(), getOfflineDiscounts(), getAllOfflineSales(),
+      ]);
+      if (!mounted) return;
+      if (cachedSettings) {
+        setRateSettings((prev: any) => ({ ...prev, ...cachedSettings }));
+        if (Array.isArray((cachedSettings as any).currencies) && (cachedSettings as any).currencies.length) setCurrencies((cachedSettings as any).currencies);
+      }
+      setDiscounts(cachedDiscounts || []);
+      setLocalDiscountUsage(countLocalDiscountUses(localSales));
+      if (!online) return;
+      const [settings, remoteDiscounts] = await Promise.all([SettingsAPI.get(), DiscountsAPI.list()]);
+      if (!mounted) return;
+      setRateSettings(settings as any);
+      if (settings?.currencies?.length) setCurrencies(settings.currencies);
+      setPaymentLines((prev) => prev.map((p, i) => i === 0 && prev.length === 1
+        ? { ...p, currency: saleCurrency, method: (PAYMENT_METHODS_BY_CURRENCY[saleCurrency] || [])[0]?.id || 'efectivo', rateSource: settings.rateMode === 'eltoque' ? 'automatic' : 'manual' }
+        : p));
+      setDiscounts(remoteDiscounts || []);
+      await Promise.all([cacheSettings(settings), cacheDiscounts(remoteDiscounts || [])]);
+    })().catch(() => {});
+    return () => { mounted = false; };
   }, [online]);
+
+  React.useEffect(() => {
+    const subscription = DeviceEventEmitter.addListener('cubagest:discounts-updated', async () => {
+      const [cachedDiscounts, localSales] = await Promise.all([getOfflineDiscounts(), getAllOfflineSales()]);
+      setDiscounts(cachedDiscounts || []);
+      setLocalDiscountUsage(countLocalDiscountUses(localSales));
+    });
+    return () => subscription.remove();
+  }, []);
+
+  function countLocalDiscountUses(sales: any[]) {
+    const counts: Record<string, number> = {};
+    for (const sale of sales) {
+      if (sale.status === 'synced') continue;
+      if (sale.discountId) counts[sale.discountId] = (counts[sale.discountId] || 0) + 1;
+      for (const item of sale.items || []) if (item.discountId) counts[item.discountId] = (counts[item.discountId] || 0) + 1;
+    }
+    return counts;
+  }
 
   const avail = (p: PosProduct) =>
     p.isOfflineRow ? (p.localStock ?? 0) : Number(p.stock);
@@ -145,7 +193,7 @@ export default function POSScreen() {
     try {
       if (!online) {
         const cached = await getOfflineProducts();
-        setProducts(cached.filter((p) => p.localStock > 0).map((p) => ({ ...p, isOfflineRow: true })));
+        setProducts(cached.filter((p) => p.active).map((p) => ({ ...p, isOfflineRow: true })));
         return;
       }
 
@@ -164,7 +212,7 @@ export default function POSScreen() {
       await activateNamespace(user, locationId);
 
       const { items } = await LocationsAPI.stock(locationId);
-      setProducts(items.filter((p: any) => p.active && p.stock > 0));
+      setProducts(items.filter((p: any) => p.active));
       // El catálogo se guarda DESPUÉS de pintar, sin esperar. Si esta escritura
       // falla, el POS sigue funcionando con los datos del servidor; solo se
       // pierde la capacidad de vender sin conexión en esa caja.
@@ -173,7 +221,7 @@ export default function POSScreen() {
       // Falló la red/permisos: caemos al cache offline sin bloquear la venta.
       const cached = await getOfflineProducts();
       if (cached.length > 0) {
-        setProducts(cached.filter((p) => (p.localStock ?? 0) > 0).map((p) => ({ ...p, isOfflineRow: true })));
+        setProducts(cached.filter((p) => p.active).map((p) => ({ ...p, isOfflineRow: true })));
         setError('Sin conexión con el servidor — vendiendo con datos locales');
       } else {
         setError((err as Error).message);
@@ -199,6 +247,47 @@ export default function POSScreen() {
   // — el mismo bug que la web ya tuvo.
   useFocusEffect(useCallback(() => { load(); }, [load, shift?.id]));
 
+  React.useEffect(() => {
+    if (!myLocationId || !user || restoredCartLocation.current === myLocationId) return;
+    let alive = true;
+    restoredCartLocation.current = myLocationId;
+    setCartReady(false);
+    void getOfflineCart(myLocationId).then((snapshot) => {
+      if (!alive) return;
+      if (snapshot && Object.keys(snapshot.cart || {}).length) setCartRestore(snapshot);
+      else setCartReady(true);
+    }).catch(() => { if (alive) setCartReady(true); });
+    return () => { alive = false; };
+  }, [myLocationId, user?.id]);
+
+  React.useEffect(() => {
+    if (!cartReady || !myLocationId || cartRestore) return;
+    const hasCart = Object.keys(cart).length > 0 || !!saleDiscountId || !!clientName || !!clientNit || !!clientPhone;
+    const write = hasCart ? saveOfflineCart({
+      locationId: myLocationId, cart, lineDiscounts, saleCurrency, paymentLines, saleDiscountId,
+      clientName, clientNit, clientPhone, updatedAt: Date.now(),
+    }) : clearOfflineCart(myLocationId);
+    void write.catch(() => {});
+  }, [cartReady, myLocationId, cart, lineDiscounts, saleCurrency, paymentLines, saleDiscountId, clientName, clientNit, clientPhone, cartRestore]);
+
+  const resolveCartRestore = (continueCart: boolean) => {
+    if (continueCart && cartRestore) {
+      setCart(cartRestore.cart || {});
+      setLineDiscounts(cartRestore.lineDiscounts || {});
+      setSaleCurrency(cartRestore.saleCurrency || 'CUP');
+      setPaymentLines(cartRestore.paymentLines?.length ? cartRestore.paymentLines : [{ id: generateUuid(), method: 'efectivo', currency: cartRestore.saleCurrency || 'CUP', amount: '', rateSource: 'automatic', exchangeRate: '' }]);
+      setSaleDiscountId(cartRestore.saleDiscountId || '');
+      setClientName(cartRestore.clientName || '');
+      setClientNit(cartRestore.clientNit || '');
+      setClientPhone(cartRestore.clientPhone || '');
+    } else if (myLocationId) {
+      setCart({}); setLineDiscounts({}); setSaleDiscountId('');
+      void clearOfflineCart(myLocationId);
+    }
+    setCartRestore(null);
+    setCartReady(true);
+  };
+
   const selectLocation = (id: string) => {
     if (!id || id === myLocationId) return;
     const loc = locations.find((l) => l.id === id);
@@ -206,6 +295,9 @@ export default function POSScreen() {
     if (loc) setMyLocationName(loc.name);
     setCart({});
     setLineDiscounts({});
+    setCartRestore(null);
+    setCartReady(false);
+    restoredCartLocation.current = '';
     // Se pasa la ubicación explícitamente: dentro de `load` el estado todavía
     // es el anterior y buscaría el stock de la caja que acabamos de dejar.
     load({ locationId: id });
@@ -213,6 +305,7 @@ export default function POSScreen() {
 
   const abrirTurnoEn = async (locationId: string, baseCash: Record<string, number>) => {
     try {
+      await activateNamespace(user, locationId);
       await abrirTurno(locationId, baseCash);
       setPidiendoTurno(false);
       // El turno es lo que fija la caja; el catálogo se recarga solo porque
@@ -255,10 +348,6 @@ export default function POSScreen() {
 
   const setQty = (product: PosProduct, qty: number) => {
     if (qty < 0) return;
-    if (qty > avail(product)) {
-      showError('Stock insuficiente: ' + `Solo hay ${avail(product)} unidades disponibles`);
-      return;
-    }
     setCart((prev) => {
       const next = { ...prev };
       if (qty === 0) delete next[product.id];
@@ -278,20 +367,20 @@ export default function POSScreen() {
     d.active !== false &&
     (!d.startsAt || new Date(d.startsAt) <= new Date()) &&
     (!d.endsAt || new Date(d.endsAt) >= new Date()) &&
+    (d.maxUses == null || Number(d.timesUsed || 0) + Number(localDiscountUsage[d.id] || 0) < Number(d.maxUses)) &&
     (d.locationScope !== 'seleccion' || (d.locationIds || []).includes(myLocationId))
   );
   const productDiscounts = usableDiscounts.filter((d) => d.scope === 'producto');
   const findDisc = (id?: string | null) => (id ? usableDiscounts.find((x) => x.id === id) : undefined);
-  // ── Descuento por venta (al total) — solo online (offline no lo soporta) ──
+  // ── Descuentos guardados con la venta para conservar el precio acordado offline ──
   const activeSaleDiscount = findDisc(saleDiscountId);
-  const saleDiscAmount = online && activeSaleDiscount
+  const saleDiscAmount = activeSaleDiscount
     ? (activeSaleDiscount.type === 'fijo'
       ? Math.min(Number(activeSaleDiscount.value), subtotal)
       : subtotal * Number(activeSaleDiscount.value) / 100)
     : 0;
   // ── Descuentos por producto (por línea, mismo cálculo que el backend) ──
   const lineDiscount = (productId: string) => {
-    if (!online) return 0;
     const d = findDisc(lineDiscounts[productId]);
     if (!d) return 0;
     const l = cartItems.find((x) => x.product.id === productId);
@@ -301,9 +390,45 @@ export default function POSScreen() {
     return Math.max(0, Math.min(amount, base));
   };
   const itemDiscountTotal = cartItems.reduce((a, l) => a + lineDiscount(l.product.id), 0);
-  const total = Math.max(0, subtotal - saleDiscAmount - itemDiscountTotal);
-  const change = Number(cashGiven) - total;
+  const taxableTotal = Math.max(0, subtotal - saleDiscAmount - itemDiscountTotal);
+  const taxAmount = Math.round(taxableTotal * Number(rateSettings.taxRate || 0) * 100) / 100;
+  const total = taxableTotal + taxAmount;
   const curSym = CURRENCY_SYMBOLS[saleCurrency] || '$';
+
+  const cupRates: Record<string, number> = {
+    CUP: 1,
+    ...((rateSettings.rateMode === 'eltoque' ? rateSettings.rates : rateSettings.manualRates) || {}),
+  };
+  const automaticRate = (from: string, to: string): number | null => {
+    if (rateSettings.rateMode !== 'eltoque') return null;
+    const source = Number(cupRates[from]);
+    const target = Number(cupRates[to]);
+    return Number.isFinite(source) && source > 0 && Number.isFinite(target) && target > 0 ? source / target : null;
+  };
+  const configuredManualRate = (from: string, to: string): number | null => {
+    const rates: Record<string, number> = { CUP: 1, ...(rateSettings.manualRates || {}) };
+    const source = Number(rates[from]);
+    const target = Number(rates[to]);
+    return Number.isFinite(source) && source > 0 && Number.isFinite(target) && target > 0 ? source / target : null;
+  };
+  const effectivePayments = paymentLines.map((line) => {
+    const same = line.currency === saleCurrency;
+    const auto = same ? 1 : automaticRate(line.currency, saleCurrency);
+    const manual = same ? 1 : configuredManualRate(line.currency, saleCurrency);
+    const rate = same ? 1 : line.rateSource === 'manual'
+      ? Number(line.exchangeRate || manual || 0)
+      : Number(auto ?? manual ?? line.exchangeRate ?? 0);
+    return {
+      ...line,
+      amount: line.amount === '' && paymentLines.length === 1 ? total : Number(line.amount || 0),
+      exchangeRate: rate,
+      rateSource: same ? 'same_currency' : (line.rateSource === 'manual' ? 'manual' : (auto ? 'automatic' : 'manual')),
+    };
+  });
+  const paidTotal = effectivePayments.reduce((sum, p) => sum + Number(p.amount || 0) * Number(p.exchangeRate || 0), 0);
+  const paymentsMatch = effectivePayments.length > 0 && effectivePayments.every((p) =>
+    Number(p.amount) > 0 && Number.isFinite(Number(p.exchangeRate)) && Number(p.exchangeRate) > 0,
+  ) && Math.abs(Math.round(paidTotal * 100) / 100 - Math.round(total * 100) / 100) <= 0.01;
 
   const checkout = async () => {
     if (cartItems.length === 0) {
@@ -315,6 +440,7 @@ export default function POSScreen() {
     if (online && needsLocationPicker && !myLocationId) {
       return showError('Ubicación requerida: ' + 'Elija la ubicación desde la que va a vender');
     }
+    if (!paymentsMatch) return showError('Los pagos deben ser mayores que cero y su equivalente debe coincidir con el total.');
 
     setSaving(true);
     try {
@@ -329,19 +455,31 @@ export default function POSScreen() {
         clientName: needsTransfer ? clientName : 'Consumidor Final',
         clientNit: needsTransfer ? clientNit : '00000000000',
         clientPhone: needsTransfer ? clientPhone : undefined,
-        payMethod,
+        payMethod: effectivePayments[0]?.method || 'efectivo',
+        payments: effectivePayments.map((p) => ({
+          method: p.method,
+          currency: p.currency,
+          amount: Number(p.amount),
+          exchangeRate: p.currency === saleCurrency ? null : Number(p.exchangeRate),
+          rateSource: p.rateSource,
+          rateUpdatedAt: p.currency === saleCurrency ? null : rateSettings.ratesUpdatedAt || null,
+        })),
         items: cartItems.map((l) => ({
           productId: l.product.id,
           name: l.product.name,
           qty: l.qty,
           price: Number(l.product.price),
           total: l.qty * Number(l.product.price),
-          discountId: online ? lineDiscounts[l.product.id] || undefined : undefined,
+          discountId: lineDiscounts[l.product.id] || undefined,
+          discountAmount: lineDiscount(l.product.id),
         })),
         subtotal,
         total,
         currency: saleCurrency,
-        discountId: online && saleDiscountId ? saleDiscountId : undefined,
+        discountId: saleDiscountId || undefined,
+        saleDiscountAmount: saleDiscAmount,
+        taxAmount,
+        offlineTimestamp: Date.now(),
       };
 
       let receiptId: string;
@@ -354,6 +492,12 @@ export default function POSScreen() {
         // ── Venta OFFLINE: va a la cola local y sincroniza sola después.
         const offline = await saveSaleOffline(saleData);
         receiptId = offline.localId;
+        setLocalDiscountUsage((prev) => {
+          const next = { ...prev };
+          if (saleData.discountId) next[saleData.discountId] = (next[saleData.discountId] || 0) + 1;
+          for (const item of saleData.items) if (item.discountId) next[item.discountId] = (next[item.discountId] || 0) + 1;
+          return next;
+        });
 
         // Si el usuario nunca ha vendido con red en este teléfono, aún no
         // conocemos su ubicación: la venta se guarda igual (el servidor la
@@ -371,27 +515,40 @@ export default function POSScreen() {
         await refreshSync();
         // Recargar con stock local actualizado
         const cached = await getOfflineProducts();
-        setProducts(cached.filter((p) => (p.localStock ?? 0) > 0).map((p) => ({ ...p, isOfflineRow: true })));
+        setProducts(cached.filter((p) => p.active).map((p) => ({ ...p, isOfflineRow: true })));
         showToast(`Factura ${offline.localId} se sincronizará automáticamente`, 'success');
       } else {
         // ── Venta ONLINE: el backend recalcula precios/impuestos y descuenta
         //    el stock de la ubicación indicada.
-        const invoice = await SalesAPI.create(saleData);
-        receiptId = (invoice as any)?.invoiceNumber || (invoice as any)?.id || '';
-        // Solo se refresca el stock de ESTA ubicación (una llamada), no el
-        // catálogo completo de la empresa.
-        if (myLocationId) {
-          const { items } = await LocationsAPI.stock(myLocationId);
-          await cacheProducts(items, myLocationId);
-          setProducts(items.filter((p: any) => p.active && p.stock > 0));
+        try {
+          const invoice = await SalesAPI.create(saleData);
+          receiptId = (invoice as any)?.invoiceNumber || (invoice as any)?.id || '';
+          // Solo se refresca el stock de ESTA ubicación (una llamada), no el
+          // catálogo completo de la empresa.
+          if (myLocationId) {
+            const { items } = await LocationsAPI.stock(myLocationId);
+            await cacheProducts(items, myLocationId);
+            setProducts(items.filter((p: any) => p.active));
+          }
+          showToast(`La factura ${receiptId} se generó correctamente`, 'success');
+        } catch (error) {
+          if (!isOfflineError(error)) throw error;
+          if (!getActiveNamespace()) await activateNamespace(user, myLocationId);
+          const offline = await saveSaleOffline(saleData);
+          receiptId = offline.localId;
+          const cached = await getOfflineProducts();
+          setProducts(cached.filter((p) => p.active).map((p) => ({ ...p, isOfflineRow: true })));
+          await refreshSync();
+          showToast(`Factura ${receiptId} guardada; se sincronizará automáticamente`, 'success');
         }
-        showToast(`La factura ${receiptId} se generó correctamente`, 'success');
       }
 
       setCart({});
       setLineDiscounts({});
-      setClientName(''); setClientNit(''); setClientPhone(''); setCashGiven('');
+      setClientName(''); setClientNit(''); setClientPhone('');
       setSaleDiscountId('');
+      setPaymentLines([{ id: generateUuid(), method: 'efectivo', currency: saleCurrency, amount: '', rateSource: rateSettings.rateMode === 'eltoque' ? 'automatic' : 'manual', exchangeRate: '' }]);
+      if (myLocationId) await clearOfflineCart(myLocationId);
     } catch (err) {
       showError((err as Error).message);
     } finally {
@@ -414,6 +571,15 @@ export default function POSScreen() {
   return (
     <View style={styles.wrap}>
       <ErrorBanner message={error} />
+      {cartRestore && (
+        <View style={{ marginHorizontal: 16, marginTop: 8, padding: 12, borderRadius: 12, backgroundColor: colors.warningBg, borderWidth: 1, borderColor: colors.warningBorder }}>
+          <Text style={{ color: colors.warningTextDark, fontWeight: '700' }}>Hay un carrito sin terminar de esta caja.</Text>
+          <View style={{ flexDirection: 'row', gap: 10, marginTop: 8 }}>
+            <TouchableOpacity onPress={() => resolveCartRestore(true)}><Text style={{ color: colors.primary, fontWeight: '700' }}>Continuar carrito</Text></TouchableOpacity>
+            <TouchableOpacity onPress={() => resolveCartRestore(false)}><Text style={{ color: colors.danger, fontWeight: '700' }}>Descartarlo</Text></TouchableOpacity>
+          </View>
+        </View>
+      )}
       {!online && (
         <View style={styles.offlineBanner}>
           <Text style={styles.offlineText}>
@@ -432,6 +598,8 @@ export default function POSScreen() {
           visible={pidiendoCierre}
           openingReadingId={shift.openingReadingId ?? ''}
           locationName={shift.locationName}
+          baseCash={shift.baseCash}
+          onConfirm={cerrarTurno}
           onCerrar={cerrarYa}
           onCancel={() => setPidiendoCierre(false)}
         />
@@ -618,7 +786,7 @@ export default function POSScreen() {
                 <View key={l.product.id} style={styles.cartLine}>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.cartLineText}>{l.qty}× {l.product.name}</Text>
-                    {online && productDiscounts.length > 0 && (
+                    {productDiscounts.length > 0 && (
                       <Sel
                         style={{ alignSelf: 'flex-start', minWidth: 160, marginTop: 3 }}
                         value={lineDiscounts[l.product.id] || ''}
@@ -641,28 +809,25 @@ export default function POSScreen() {
           </ScrollView>
         )}
 
-        {/* Moneda / Pago / Descuento / Efectivo — Fields con selects nativos,
-            idéntico al bloque de la web */}
+        {/* Moneda de factura y descuento. Los pagos se indican por separado para
+            poder combinar efectivo, transferencias y monedas. */}
         <View style={styles.optsRow}>
           {currencies.length > 0 && (
             <Field label="Moneda">
               <Sel
                 style={{ minWidth: 90 }}
                 value={saleCurrency}
-                onValueChange={setSaleCurrency}
+                onValueChange={(next) => {
+                  setSaleCurrency(next);
+                  setPaymentLines((prev) => prev.map((p, i) => i === 0 && prev.length === 1
+                    ? { ...p, currency: next, method: (PAYMENT_METHODS_BY_CURRENCY[next] || [])[0]?.id || 'efectivo', exchangeRate: '', rateSource: rateSettings.rateMode === 'eltoque' ? 'automatic' : 'manual' }
+                    : p));
+                }}
                 items={currencies.map((m) => ({ label: m, value: m }))}
               />
             </Field>
           )}
-          <Field label="Pago">
-            <Sel
-              style={{ minWidth: 130 }}
-              value={payMethod}
-              onValueChange={setPayMethod}
-              items={PAY_METHODS.map((m) => ({ label: m.label, value: m.id }))}
-            />
-          </Field>
-          {online && usableDiscounts.some((d) => d.scope === 'venta') && (
+          {usableDiscounts.some((d) => d.scope === 'venta') && (
             <Field label="Descuento">
               <Sel
                 style={{ minWidth: 120 }}
@@ -678,23 +843,68 @@ export default function POSScreen() {
               />
             </Field>
           )}
-          {payMethod === 'efectivo' && (
-            <Field label="Efectivo">
-              <Inp
-                style={{ width: 100, paddingVertical: 6, paddingHorizontal: 10, fontSize: 12 }}
-                value={cashGiven}
-                onChangeText={setCashGiven}
-                keyboardType="decimal-pad"
-                placeholder="0.00"
-              />
-            </Field>
-          )}
         </View>
 
-        {/* Cambio / descuentos — mismo orden y formato que la web */}
-        {payMethod === 'efectivo' && cashGiven && Number(cashGiven) >= total && (
-          <Text style={styles.changeText}>Cambio: {curSym}{fmt(change)} {saleCurrency}</Text>
-        )}
+        <View style={{ maxHeight: 150, paddingHorizontal: 12, paddingTop: 6 }}>
+          <ScrollView nestedScrollEnabled keyboardShouldPersistTaps="handled">
+            {paymentLines.map((line, index) => {
+              const methods = PAYMENT_METHODS_BY_CURRENCY[line.currency] || [];
+              const same = line.currency === saleCurrency;
+              const auto = same ? 1 : automaticRate(line.currency, saleCurrency);
+              const manual = same ? 1 : configuredManualRate(line.currency, saleCurrency);
+              const source = same ? 'same_currency' : (line.rateSource === 'manual' || !auto ? 'manual' : 'automatic');
+              const shownRate = same ? 1 : source === 'automatic' ? auto : Number(line.exchangeRate || manual || 0);
+              return (
+                <View key={line.id} style={{ gap: 6, paddingVertical: 7, borderTopWidth: index ? 1 : 0, borderTopColor: colors.border }}>
+                  <View style={{ flexDirection: 'row', gap: 8 }}>
+                    <Field label="Moneda recibida">
+                      <Sel style={{ minWidth: 95 }} value={line.currency} onValueChange={(currency) => {
+                        const method = (PAYMENT_METHODS_BY_CURRENCY[currency] || [])[0]?.id || 'efectivo';
+                        setPaymentLines((prev) => prev.map((p) => p.id === line.id ? { ...p, currency, method, exchangeRate: '', rateSource: rateSettings.rateMode === 'eltoque' ? 'automatic' : 'manual' } : p));
+                      }} items={currencies.map((currency) => ({ label: currency, value: currency }))} />
+                    </Field>
+                    <Field label="Método">
+                      <Sel style={{ minWidth: 115 }} value={line.method} onValueChange={(method) => setPaymentLines((prev) => prev.map((p) => p.id === line.id ? { ...p, method } : p))} items={methods.map((m) => ({ label: m.label, value: m.id }))} />
+                    </Field>
+                  </View>
+                  <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 8 }}>
+                    <Field label={`Monto (${line.currency})`}>
+                      <Inp style={{ width: 105 }} keyboardType="decimal-pad" value={line.amount === '' && paymentLines.length === 1 ? String(total) : line.amount} onChangeText={(amount) => setPaymentLines((prev) => prev.map((p) => p.id === line.id ? { ...p, amount } : p))} placeholder="0.00" />
+                    </Field>
+                    {!same && (
+                      <>
+                        <Field label="Tasa">
+                          <Sel style={{ minWidth: 110 }} value={source} onValueChange={(rateSource) => setPaymentLines((prev) => prev.map((p) => p.id === line.id ? { ...p, rateSource, exchangeRate: rateSource === 'manual' ? String(manual || '') : '' } : p))} items={[
+                            ...(auto ? [{ label: 'Automática · recomendada', value: 'automatic' }] : []),
+                            { label: 'Manual', value: 'manual' },
+                          ]} />
+                        </Field>
+                        {source === 'manual' ? (
+                          <Field label={`${line.currency} → ${saleCurrency}`}>
+                            <Inp style={{ width: 90 }} keyboardType="decimal-pad" value={line.exchangeRate || String(manual || '')} onChangeText={(exchangeRate) => setPaymentLines((prev) => prev.map((p) => p.id === line.id ? { ...p, exchangeRate, rateSource: 'manual' } : p))} placeholder="Tasa" />
+                          </Field>
+                        ) : (
+                          <Text style={{ color: colors.textMuted, fontSize: 10, flex: 1, paddingBottom: 8 }}>{shownRate ? `${Number(shownRate).toFixed(4)} automática` : 'Sin tasa automática'}</Text>
+                        )}
+                      </>
+                    )}
+                    {paymentLines.length > 1 && <TouchableOpacity onPress={() => setPaymentLines((prev) => prev.filter((p) => p.id !== line.id))} style={{ padding: 8 }}><Text style={{ color: colors.danger }}>Quitar</Text></TouchableOpacity>}
+                  </View>
+                </View>
+              );
+            })}
+          </ScrollView>
+          <TouchableOpacity disabled={paymentLines.length >= 8} onPress={() => {
+            const first = paymentLines[0];
+            setPaymentLines((prev) => [...prev.map((p, i) => i === 0 && p.amount === '' ? { ...p, amount: String(total) } : p), {
+              id: generateUuid(), method: (PAYMENT_METHODS_BY_CURRENCY[saleCurrency] || [])[0]?.id || 'efectivo',
+              currency: saleCurrency, amount: '0', rateSource: rateSettings.rateMode === 'eltoque' ? 'automatic' : 'manual', exchangeRate: '',
+            }]);
+          }} style={{ alignSelf: 'flex-start', paddingVertical: 6 }}><Text style={{ color: colors.primary, fontWeight: '700' }}>+ Añadir forma de pago</Text></TouchableOpacity>
+          <Text style={{ color: paymentsMatch ? colors.success : colors.warning, fontSize: 11 }}>
+            {paymentsMatch ? 'Pagos conciliados' : `Equivalente: ${curSym}${fmt(paidTotal)} ${saleCurrency} · debe coincidir con ${curSym}${fmt(total)}`}
+          </Text>
+        </View>
         {saleDiscAmount > 0 && (
           <View style={styles.discRow}>
             <Text style={styles.discRowText}>Descuento:</Text>

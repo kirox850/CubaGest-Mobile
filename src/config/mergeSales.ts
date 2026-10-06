@@ -65,6 +65,7 @@ function toRow(sale: OfflineSale): MergedSaleRow {
     total: num(sale.total),
     currency: sale.currency || 'CUP',
     payMethod: sale.payMethod,
+    payments: sale.payments,
     status: 'emitida',
     locationId: sale.locationId,
     clientSaleId: sale.clientSaleId,

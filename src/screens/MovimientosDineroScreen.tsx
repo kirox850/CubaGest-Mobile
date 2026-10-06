@@ -26,6 +26,9 @@ import { CURRENCY_SYMBOLS } from '../config/roles';
 import { validarMovimiento, puedeAprobar, sePuedeDecidir, type TipoMovimiento } from '../config/movimientoDinero';
 import { Badge, Btn, EmptyState, ErrorBanner, Inp, Sel, PageHeader, SkeletonRows, SectionCard, showToast } from '../components/UI';
 import { showConfirm, showError } from '../components/dialogs';
+import { isOfflineError } from '../api/client';
+import { enqueueOfflineOperation, getOfflineOperations } from '../offline/offlineStore';
+import { generateUuid } from '../utils/uuid';
 import Icon from '../components/Icon';
 import type { CashMovement, Location } from '../types';
 import {
@@ -63,6 +66,7 @@ export default function MovimientosDineroScreen() {
 
   // Formulario de nuevo movimiento
   const [tipo, setTipo] = useState<TipoMovimiento>('salida');
+  const [purpose, setPurpose] = useState<'retiro' | 'caja_fuerte'>('retiro');
   const [monto, setMonto] = useState('');
   const [motivo, setMotivo] = useState('');
   const [moneda, setMoneda] = useState('CUP');
@@ -73,7 +77,14 @@ export default function MovimientosDineroScreen() {
       setError('');
       setLoading(true);
       const lista = await CashMovementsAPI.list();
-      setTodos(lista);
+      const pendingOps = await getOfflineOperations(['pending', 'syncing', 'conflict']);
+      const local = pendingOps.filter((op) => op.kind === 'cash_movement').map((op: any) => ({
+        id: op.payload.clientMovementId, locationId: op.payload.locationId, type: op.payload.type,
+        amount: op.payload.amount, currency: op.payload.currency, reason: op.payload.reason,
+        status: 'pendiente', businessAt: op.payload.businessAt, createdAt: op.payload.businessAt,
+        offlinePending: true,
+      } as any));
+      setTodos([...local, ...lista]);
       void cacheMovements(lista).catch(() => {});
     } catch (e) {
       // Sin red se muestran los movimientos ya registrados. El saldo de la caja
@@ -128,7 +139,7 @@ export default function MovimientosDineroScreen() {
     }
     try {
       setSaving(true);
-      await CashMovementsAPI.create({
+      const body = {
         locationId: cajaId,
         type: tipo,
         amount: Number(String(monto).replace(',', '.')),
@@ -139,8 +150,16 @@ export default function MovimientosDineroScreen() {
         // periodo equivocado y la apertura siguiente saltaría un descuadre que no
         // existe.
         businessAt: new Date().toISOString(),
-      });
-      showToast(tipo === 'salida' ? 'Salida registrada. Queda pendiente de aprobación.' : 'Entrada registrada.', 'success');
+        clientMovementId: generateUuid(),
+        purpose,
+      };
+      try {
+        await CashMovementsAPI.create(body);
+      } catch (error) {
+        if (!isOfflineError(error)) throw error;
+        await enqueueOfflineOperation('cash_movement', body as any, Date.parse(body.businessAt), body.clientMovementId);
+      }
+      showToast(purpose === 'caja_fuerte' ? 'Dinero enviado a caja fuerte o en cola de sincronización.' : tipo === 'salida' ? 'Salida guardada. Si estás offline, se enviará y quedará pendiente de aprobación.' : 'Entrada registrada o en cola de sincronización.', 'success');
       setMonto('');
       setMotivo('');
       setModo('list');
@@ -237,11 +256,21 @@ export default function MovimientosDineroScreen() {
           )}
         </SectionCard>
 
+        {tipo === 'salida' && user?.role === 'admin' && (
+          <SectionCard title="Destino del dinero">
+            <Sel value={purpose} onValueChange={(v) => setPurpose(v as 'retiro' | 'caja_fuerte')} items={[
+              { label: 'Retiro de caja', value: 'retiro' },
+              { label: 'Pasar dinero a caja fuerte', value: 'caja_fuerte' },
+            ]} />
+            <Text style={styles.hint}>Un gasto de empresa se registra en Contabilidad; esto solo mueve efectivo desde la caja.</Text>
+          </SectionCard>
+        )}
+
         <SectionCard title="Motivo">
           <Inp
             value={motivo}
             onChangeText={setMotivo}
-            placeholder={tipo === 'salida' ? 'El dueño retiró para pagar el agua' : 'Opcional'}
+            placeholder={purpose === 'caja_fuerte' ? 'Traslado de efectivo a caja fuerte' : tipo === 'salida' ? 'Motivo de la salida' : 'Opcional'}
           />
           {tipo === 'salida' && (
             <Text style={styles.hint}>

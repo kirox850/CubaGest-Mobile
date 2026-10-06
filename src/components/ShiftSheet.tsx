@@ -27,6 +27,8 @@ import { Btn, Inp, showToast } from './UI';
 import Icon from './Icon';
 import { baseCashDe, type FilaMoneda } from '../config/cierreDinero';
 import { ClosingAPI, ProductsAPI } from '../api/endpoints';
+import { getOfflineProducts } from '../offline/offlineStore';
+import { isOfflineError } from '../api/client';
 
 import type { AssignedCaja, Shift } from '../types';
 
@@ -89,7 +91,17 @@ export default function ShiftSheet({
       setCadena(chain);
       setPaso('contar');
     } catch (e) {
-      showToast('No se pudo cargar la caja: ' + (e as Error).message, 'error');
+      if (offline || isOfflineError(e)) {
+        const cached = await getOfflineProducts();
+        if (cached.length) {
+          setConteo(cached.map((p) => ({
+            productId: p.id, productName: p.name, unit: p.unit || 'u',
+            esperado: Number(p.localStock) || 0, contado: Number(p.localStock) || 0,
+          })));
+          setCadena({ aperturaHeredada: false, offline: true });
+          setPaso('contar');
+        } else showToast('No hay productos guardados para contar esta caja.', 'error');
+      } else showToast('No se pudo cargar la caja: ' + (e as Error).message, 'error');
     } finally {
       setCargandoConteo(false);
     }

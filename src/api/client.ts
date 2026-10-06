@@ -87,7 +87,9 @@ export async function apiFetch<T = unknown>(
     }
 
     if (!res.ok) {
-      throw new Error(serverError || `Error ${res.status}`);
+      const error = new Error(serverError || `Error ${res.status}`) as Error & { status?: number };
+      error.status = res.status;
+      throw error;
     }
 
     // El backend siempre envuelve la respuesta con { ok, ... }. Algunos

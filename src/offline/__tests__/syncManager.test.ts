@@ -14,6 +14,9 @@ import {
   getOfflineProducts,
   getAllOfflineSales,
   saveSaleOffline,
+  enqueueOfflineOperation,
+  getOfflineOperations,
+  updateOfflineOperation,
 } from '../offlineStore';
 import { __resetNamespaceForTests, activateNamespace } from '../namespace';
 import type { User } from '../../types';
@@ -153,6 +156,22 @@ describe('runSync', () => {
     expect(await localStockOf('p1')).toBe(10);
   });
 
+  it('no sincroniza operaciones posteriores a un conflicto previo', async () => {
+    const base = Date.now() - 1_000;
+    const earlier = await enqueueOfflineOperation(
+      'cash_movement', { amount: 50, locationId: LOCATION }, base, 'movement-blocker-01',
+    );
+    await updateOfflineOperation(earlier.clientOperationId, 'conflict', { lastError: 'Requiere revisión' });
+    const later = await saveSaleOffline(saleItem('p1', 1));
+    mockedFetch.mockResolvedValue({ ok: true } as any);
+
+    const result = await runSync(true);
+
+    expect(result.error).toMatch(/operación anterior en conflicto/i);
+    expect(mockedFetch).not.toHaveBeenCalled();
+    expect((await getAllOfflineSales()).find((sale) => sale.localId === later.localId)?.status).toBe('pending');
+  });
+
   it('reconoce el resultado por clientSaleId aunque cambie el localId', async () => {
     const sale = await saveSaleOffline(saleItem());
     mockedFetch.mockResolvedValue([
@@ -205,5 +224,47 @@ describe('runSync', () => {
     const all = (await getAllOfflineSales()).sort((x, y) => x.timestamp - y.timestamp);
     expect(all[0].status).toBe('synced');
     expect(all[1].status).toBe('conflict');
+  });
+
+  it('sincroniza ventas y dos turnos consecutivos en el orden de su hora real', async () => {
+    const base = 1_800_000_000_000;
+    jest.useFakeTimers();
+    jest.setSystemTime(base);
+    const calls: Array<{ path: string; body: any }> = [];
+    mockedFetch.mockImplementation(async (path: any, options: any) => {
+      calls.push({ path: String(path), body: options?.body });
+      if (path === '/sales/sync') {
+        return (options.body.sales as any[]).map((sale) => ({
+          localId: sale.localId, clientSaleId: sale.clientSaleId, status: 'synced', serverId: `server-${sale.localId}`,
+        })) as any;
+      }
+      if (path === '/shift/start') {
+        return { shift: { openingReadingId: `server-${options.body.clientReadingId}` } } as any;
+      }
+      return { ok: true } as any;
+    });
+
+    await enqueueOfflineOperation('shift_open', { clientShiftId: 'shift-one-0001', clientReadingId: 'reading-one-01', locationId: LOCATION, baseCash: { CUP: 0 }, items: [] }, base, 'shift-one-0001');
+    jest.setSystemTime(base + 1_000);
+    await saveSaleOffline(saleItem('p1', 1));
+    jest.setSystemTime(base + 2_000);
+    await enqueueOfflineOperation('shift_close', { initialReadingId: 'reading-one-01', countedAt: new Date(base + 2_000).toISOString(), items: [], countedCash: { CUP: 50 } }, base + 2_000, 'close-one-0001');
+    jest.setSystemTime(base + 3_000);
+    await enqueueOfflineOperation('shift_open', { clientShiftId: 'shift-two-0002', clientReadingId: 'reading-two-02', locationId: LOCATION, baseCash: { CUP: 50 }, items: [] }, base + 3_000, 'shift-two-0002');
+    jest.setSystemTime(base + 4_000);
+    await saveSaleOffline(saleItem('p1', 1));
+    jest.setSystemTime(base + 5_000);
+    await enqueueOfflineOperation('shift_close', { initialReadingId: 'reading-two-02', countedAt: new Date(base + 5_000).toISOString(), items: [], countedCash: { CUP: 100 } }, base + 5_000, 'close-two-0002');
+
+    const result = await runSync();
+
+    expect(result).toMatchObject({ synced: 2, operationsSynced: 4, conflicts: 0, unknown: 0 });
+    expect(calls.map((call) => call.path)).toEqual([
+      '/shift/start', '/sales/sync', '/shift/end', '/shift/start', '/sales/sync', '/shift/end',
+    ]);
+    expect(calls[2].body.initialReadingId).toBe('server-reading-one-01');
+    expect(calls[5].body.initialReadingId).toBe('server-reading-two-02');
+    expect((await getOfflineOperations(['synced'])).every((operation) => operation.status === 'synced')).toBe(true);
+    jest.useRealTimers();
   });
 });

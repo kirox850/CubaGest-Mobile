@@ -121,7 +121,7 @@ export default function FacturacionScreen() {
       clientName: s.clientName || s.client || '',
       clientNit: s.clientNit || '',
       clientPhone: s.clientPhone || '',
-      payMethod: s.payMethod || 'efectivo',
+      payMethod: s.payments?.length === 1 ? s.payments[0].method : '',
     });
     setEditModal(true);
   };
@@ -142,12 +142,10 @@ export default function FacturacionScreen() {
   };
 
   const voidSale = async (id: string) => {
-    // Se anuncia el efecto ANTES de preguntar, no después: anular devuelve el
-    // stock al almacén y eso no se deshace.
-    if (!(await showConfirm('Se devolverá el stock al almacén. ¿Anular la factura?'))) return;
+    if (!(await showConfirm('La devolución se registrará con la fecha original de la venta y el recálculo ajustará las fotos posteriores. ¿Anular esta factura?'))) return;
     try {
       await SalesAPI.voidSale(id);
-      showToast('Factura anulada', 'success');
+      showToast('Factura anulada. El inventario se recalculará desde la fecha original.', 'success');
       setViewInv(null);
       load();
     } catch (e) {
@@ -343,7 +341,15 @@ export default function FacturacionScreen() {
                   <Text style={styles.receiptLine}>Cliente: {viewInv.clientName || viewInv.client}</Text>
                   {viewInv.clientNit && viewInv.clientNit !== '00000000000' && <Text style={styles.receiptLine}>Carnet: {viewInv.clientNit}</Text>}
                   {viewInv.clientPhone && <Text style={styles.receiptLine}>Tel: {viewInv.clientPhone}</Text>}
-                  <Text style={styles.receiptLine}>Metodo: {PAY_METHODS.find(p => p.id === viewInv.payMethod)?.label || viewInv.payMethod}</Text>
+                  {viewInv.payments?.length ? <>
+                    <Text style={styles.receiptLine}>Pagos:</Text>
+                    {viewInv.payments.map((payment: any, index: number) => (
+                      <Text key={index} style={styles.receiptLine}>
+                        {PAY_METHODS.find(p => p.id === payment.method)?.label || payment.method} · {payment.currency} {CURRENCY_SYMBOLS[payment.currency] || ''}{fmt(Number(payment.amount))}
+                        {payment.exchangeRate ? ` · tasa ${payment.exchangeRate} (${payment.rateSource === 'automatic' ? 'automática' : 'manual'})` : ''}
+                      </Text>
+                    ))}
+                  </> : <Text style={styles.receiptLine}>Método: {PAY_METHODS.find(p => p.id === viewInv.payMethod)?.label || viewInv.payMethod}</Text>}
                   <Text style={styles.receiptDivider}>─────────────────────</Text>
                   {(viewInv.items || (viewInv as any).SaleItems || []).map((item: any, i: number) => (
                     <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
@@ -351,6 +357,7 @@ export default function FacturacionScreen() {
                       <Text style={styles.receiptLine}>{CURRENCY_SYMBOLS[viewInv.currency] || '$'}{fmt(Number(item.total) || item.price * item.qty)}</Text>
                     </View>
                   ))}
+                  {Number(viewInv.tax || 0) > 0 && <Text style={styles.receiptLine}>Impuesto: {CURRENCY_SYMBOLS[viewInv.currency] || '$'}{fmt(Number(viewInv.tax))}</Text>}
                   <Text style={styles.receiptDivider}>─────────────────────</Text>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                     <Text style={[styles.receiptLine, { fontWeight: '800' }]}>TOTAL:</Text>
@@ -386,16 +393,17 @@ export default function FacturacionScreen() {
           <View style={styles.modalBg}>
             <View style={styles.modalCard}>
               <Text style={styles.modalTitle}>Editar datos de factura</Text>
-              <Text style={styles.note}>⚠ Solo se pueden editar los datos del cliente y método de pago. Los productos y totales no cambian.</Text>
+              <Text style={styles.note}>Solo se pueden editar los datos del cliente. Para corregir un pago o producto, anula la factura y regístrala de nuevo; el inventario se ajustará desde la fecha original.</Text>
               <Inp style={{ marginBottom: 10 }} value={editForm.clientName} onChangeText={v => setEditForm(f => ({ ...f, clientName: v }))} placeholder="Nombre del cliente" />
               <Inp style={{ marginBottom: 10 }} value={editForm.clientNit} onChangeText={v => setEditForm(f => ({ ...f, clientNit: v }))} placeholder="Carnet" keyboardType="numeric" maxLength={11} />
               <Inp style={{ marginBottom: 10 }} value={editForm.clientPhone} onChangeText={v => setEditForm(f => ({ ...f, clientPhone: v }))} placeholder="Teléfono" keyboardType="phone-pad" />
-              <Sel
+              {viewInv?.payments?.length === 1 && <Sel
                 style={{ marginBottom: 12 }}
-                value={editForm.payMethod || 'efectivo'}
+                value={editForm.payMethod}
                 onValueChange={(v: string) => setEditForm(f => ({ ...f, payMethod: v }))}
                 items={PAY_METHODS.map(m => ({ label: m.label, value: m.id }))}
-              />
+              />}
+              {(viewInv?.payments?.length || 0) > 1 && <Text style={styles.note}>Esta factura tiene pagos divididos; para corregirlos, anúlala y regístrala de nuevo.</Text>}
               <View style={styles.modalActions}>
                 <TouchableOpacity style={styles.btnSecondary} onPress={() => setEditModal(false)}>
                   <Text style={{ fontWeight: '600' }}>Cancelar</Text>
@@ -464,4 +472,3 @@ export const styles = new Proxy({} as ReturnType<typeof createStyles>, {
     return __styles[prop as keyof ReturnType<typeof createStyles>];
   },
 });
-

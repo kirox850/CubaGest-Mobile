@@ -24,13 +24,13 @@
 // afectada (una llamada), nunca el catálogo completo.
 
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
-import { AppState } from 'react-native';
+import { AppState, DeviceEventEmitter } from 'react-native';
 import NetInfo from '@react-native-community/netinfo';
 import { useAuth } from './AuthContext';
 import { runSync, isSyncing, recoverStuckSyncing, type SyncResult } from '../offline/syncManager';
-import { getAllOfflineSales, cacheProducts, type OfflineSale } from '../offline/offlineStore';
+import { getAllOfflineSales, getOfflineOperations, cacheProducts, cacheDiscounts, recoverStuckOfflineOperations, type OfflineSale } from '../offline/offlineStore';
 import { getActiveNamespace, UNKNOWN_LOCATION } from '../offline/namespace';
-import { LocationsAPI } from '../api/endpoints';
+import { DiscountsAPI, LocationsAPI } from '../api/endpoints';
 import { debeCorrerCiclo, SYNC_CYCLE_MS } from '../offline/syncCycle';
 
 interface SyncContextValue {
@@ -57,10 +57,10 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
   const lastAutoSync = useRef(0);
 
   const refresh = useCallback(async () => {
-    const all = await getAllOfflineSales();
+    const [all, operations] = await Promise.all([getAllOfflineSales(), getOfflineOperations(['pending', 'syncing', 'conflict'])]);
     setOfflineSales(all);
-    setPendingCount(all.filter((s) => s.status === 'pending').length);
-    setConflictCount(all.filter((s) => s.status === 'conflict').length);
+    setPendingCount(all.filter((s) => s.status === 'pending').length + operations.filter((op) => op.status === 'pending' || op.status === 'syncing').length);
+    setConflictCount(all.filter((s) => s.status === 'conflict').length + operations.filter((op) => op.status === 'conflict').length);
   }, []);
 
   /** Tras sincronizar: solo el stock de la ubicación que وكانت afectada. */
@@ -84,6 +84,12 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
       if (!result.error && result.synced > 0) {
         lastAutoSync.current = Date.now();
         await refreshLocationStock();
+        try {
+          await cacheDiscounts(await DiscountsAPI.list());
+          DeviceEventEmitter.emit('cubagest:discounts-updated');
+        } catch {
+          // La caché local se conserva si el catálogo no pudo refrescarse.
+        }
       }
       return result;
     },
@@ -94,6 +100,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     (async () => {
       await recoverStuckSyncing();
+      await recoverStuckOfflineOperations();
       await refresh();
     })();
   }, [refresh]);

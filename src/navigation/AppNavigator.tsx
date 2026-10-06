@@ -16,6 +16,7 @@ import { DialogHost, showConfirm } from '../components/dialogs';
 import { ToastHost } from '../components/UI';
 import LegalModal from '../components/LegalModal';
 import WelcomeTour from '../components/WelcomeTour';
+import NotificationsBell, { unregisterNativePush } from '../components/NotificationsBell';
 import Icon, { type IconName } from '../components/Icon';
 
 import DashboardScreen from '../screens/DashboardScreen';
@@ -92,7 +93,10 @@ function HeaderRight({ navigation, onOpenPlan, onOpenLegal, onOpenTour, onOpenMo
 
   const confirmLogout = async () => {
     setMenuOpen(false);
-    if (await showConfirm('¿Seguro que desea salir? Se cerrará el turno abierto.')) logout();;
+    if (await showConfirm('¿Seguro que desea salir? Se cerrará el turno abierto.')) {
+      try { await unregisterNativePush(); } catch { /* salir no depende de que haya conexión */ }
+      logout();
+    }
   };
 
   const roleColor = ROLES[user?.role || '']?.color || colors.primary;
@@ -107,6 +111,7 @@ function HeaderRight({ navigation, onOpenPlan, onOpenLegal, onOpenTour, onOpenMo
 
   return (
     <View style={s.headerRight}>
+      <NotificationsBell onNavigate={onOpenModule} />
       {/* Pills de sync — equivalente móvil del OfflineBanner de la web */}
       {!online && (
         <View style={s.offlinePill}>

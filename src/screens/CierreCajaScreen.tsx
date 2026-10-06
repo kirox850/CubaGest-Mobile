@@ -2,6 +2,7 @@ import React, { useCallback, useState } from 'react';
 import { View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, Modal, ScrollView } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { ClosingAPI, LocationsAPI, ProductsAPI } from '../api/endpoints';
+import { isOfflineError } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { colors, themeRef } from '../config/theme';
 import { Badge, EmptyState, ErrorBanner, Skeleton, Btn, PageHeader, showToast } from '../components/UI';
@@ -14,7 +15,9 @@ import {
   cacheClosings, getOfflineClosings,
   cacheReadings, getOfflineReadings,
   cacheLocations, getOfflineLocations,
+  enqueueOfflineOperation, getOfflineOperations, getOfflineProducts,
 } from '../offline/offlineStore';
+import { generateUuid } from '../utils/uuid';
 
 const fmt = (n: number) => new Intl.NumberFormat('es-CU', { minimumFractionDigits: 2 }).format(n || 0);
 const fmtDate = (d: string) =>
@@ -97,7 +100,14 @@ export default function CierreCajaScreen() {
     try {
       setError('');
       const list = await ClosingAPI.readings();
-      setReadings(list);
+      const localOps = await getOfflineOperations(['pending', 'syncing', 'conflict']);
+      const queued = localOps.filter((op) => op.kind === 'manual_reading').map((op: any) => ({
+        id: op.payload.clientReadingId, companyId: user?.businessId || user?.company?.id || '',
+        locationId: op.payload.locationId, takenById: user?.id || '', type: 'apertura' as const,
+        notes: op.payload.notes, items: (op.payload.items || []).map((i: any) => ({ productId: i.productId, productCode: '', productName: '', unit: '', qty: i.contado })),
+        createdAt: op.payload.businessAt, syncStatus: op.status,
+      }));
+      setReadings([...queued, ...list]);
       void cacheReadings(list).catch(() => {});
       setView('selectReading');
     } catch (e) {
@@ -105,8 +115,15 @@ export default function CierreCajaScreen() {
       // puede ni siquiera empezar a cerrar sin red, que es exactamente lo que
       // pasaba: la caja no tenía ninguna hasta que alguien entraba aquí con red.
       const local = await getOfflineReadings();
-      if (local.length > 0) {
-        setReadings(local);
+      const localOps = await getOfflineOperations(['pending', 'syncing', 'conflict']);
+      const queued = localOps.filter((op) => op.kind === 'manual_reading').map((op: any) => ({
+        id: op.payload.clientReadingId, companyId: user?.businessId || user?.company?.id || '',
+        locationId: op.payload.locationId, takenById: user?.id || '', type: 'apertura' as const,
+        notes: op.payload.notes, items: (op.payload.items || []).map((i: any) => ({ productId: i.productId, productCode: '', productName: '', unit: '', qty: i.contado })),
+        createdAt: op.payload.businessAt, syncStatus: op.status,
+      }));
+      if (local.length > 0 || queued.length > 0) {
+        setReadings([...queued, ...local]);
         setError('Sin conexión — usando las lecturas guardadas en este dispositivo');
         setView('selectReading');
       } else {
@@ -119,10 +136,18 @@ export default function CierreCajaScreen() {
     try {
       setSaving(true);
       setSelectedReading(reading);
-      const data = await ClosingAPI.preview(reading.id);
+      let data: any;
+      try {
+        data = await ClosingAPI.preview(reading.id);
+      } catch (error) {
+        if (!isOfflineError(error)) throw error;
+        const cached = await getOfflineProducts();
+        if (!cached.length) throw new Error('No hay un catálogo guardado para contar esta caja.');
+        data = { items: cached.map((p) => ({ productId: p.id, productName: p.name, stockValidated: p.localStock, stockExpected: p.localStock, price: p.price })), totalSales: 0, totalIncome: 0 };
+      }
       setPreview(data);
       const init: Record<string, string> = {};
-      for (const item of data.items) init[item.productId] = String(item.stockValidated);
+      for (const item of data.items) init[item.productId] = String(item.stockValidated ?? item.stockExpected ?? 0);
       setValidatedItems(init);
       // Cada lectura arranca con su conteo: el dinero se cuenta en la caja, en
       // un momento concreto, y arrastrar el conteo de otro conteo inventaría
@@ -154,13 +179,24 @@ export default function CierreCajaScreen() {
       // sin countedCash el backend conciliaba contra un conteo vacío y cada
       // cierre hecho desde el teléfono salía money-blind.
       const conDinero = hayConteo(contado);
-      await ClosingAPI.confirm({
+      const countedAt = conDinero ? new Date(contadoAt ?? Date.now()).toISOString() : new Date().toISOString();
+      const clientClosingId = generateUuid();
+      const clientReadingId = generateUuid();
+      const request = {
         initialReadingId: selectedReading.id,
         items,
         notes: notes || undefined,
         countedCash: conDinero ? countedCashDe(contado) : {},
-        countedAt: conDinero ? new Date(contadoAt ?? Date.now()).toISOString() : undefined,
-      });
+        countedAt,
+        clientClosingId,
+        clientReadingId,
+      };
+      try {
+        await ClosingAPI.confirm(request);
+      } catch (error) {
+        if (!isOfflineError(error)) throw error;
+        await enqueueOfflineOperation('closing_confirm', request, Date.parse(countedAt), clientClosingId);
+      }
       showToast('Cierre registrado correctamente', 'success');
       setView('list');
       setPreview(null);
@@ -169,7 +205,7 @@ export default function CierreCajaScreen() {
       setContadoAt(null);
       loadClosings();
     } catch (e) {
-      showError((e as Error).message);
+      if (!isOfflineError(e)) showError((e as Error).message);
     } finally {
       setSaving(false);
     }
@@ -184,10 +220,16 @@ export default function CierreCajaScreen() {
 
   const openReading = async (locationId: string) => {
     try {
-      const [chain, productos] = await Promise.all([
-        ClosingAPI.chain(locationId),
-        ProductsAPI.list(),
-      ]);
+      let chain: any;
+      let productos: any[];
+      try {
+        [chain, productos] = await Promise.all([ClosingAPI.chain(locationId), ProductsAPI.list()]);
+      } catch (error) {
+        if (!isOfflineError(error)) throw error;
+        chain = { aperturaHeredada: false, offline: true };
+        productos = await getOfflineProducts();
+        if (!productos.length) throw new Error('No hay productos guardados para contar esta caja.');
+      }
       const esperadoPorProducto = new Map<string, number>(
         ((chain as any)?.esperado?.items || []).map((x: any) => [String(x.productId), Number(x.diff || 0)]),
       );
@@ -195,8 +237,8 @@ export default function CierreCajaScreen() {
         productId: p.id,
         productName: p.name,
         unit: p.unit || 'u',
-        esperado: esperadoPorProducto.get(String(p.id)) ?? 0,
-        contado: esperadoPorProducto.get(String(p.id)) ?? 0,
+        esperado: esperadoPorProducto.get(String(p.id)) ?? Number(p.localStock ?? 0),
+        contado: esperadoPorProducto.get(String(p.id)) ?? Number(p.localStock ?? 0),
       })));
       setChainInfo(chain);
       setConfirmReading(true);
@@ -209,12 +251,17 @@ export default function CierreCajaScreen() {
     if (!readingLocationId) return showError('Selecciona la ubicación');
     try {
       setSaving(true);
-      await ClosingAPI.takeReading(
-        readingLocationId,
-        'Conteo de apertura',
-        countRows.map((r) => ({ productId: r.productId, contado: Number(r.contado) || 0 })),
-        new Date().toISOString(),
-      );
+      const businessAt = new Date().toISOString();
+      const clientReadingId = generateUuid();
+      const requestItems = countRows.map((r) => ({ productId: r.productId, contado: Number(r.contado) || 0 }));
+      try {
+        await ClosingAPI.takeReading(readingLocationId, 'Conteo de apertura', requestItems, businessAt, clientReadingId);
+      } catch (error) {
+        if (!isOfflineError(error)) throw error;
+        await enqueueOfflineOperation('manual_reading', {
+          locationId: readingLocationId, notes: 'Conteo de apertura', items: requestItems, businessAt, clientReadingId,
+        }, Date.parse(businessAt), clientReadingId);
+      }
       showToast(
         chainInfo?.aperturaHeredada
           ? 'Apertura registrada heredando el cierre anterior'

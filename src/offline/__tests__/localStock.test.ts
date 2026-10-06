@@ -51,8 +51,8 @@ describe('derivarLocalStock', () => {
     expect(derivarLocalStock(10, 3)).toBe(7);
   });
 
-  it('nunca baja de cero', () => {
-    expect(derivarLocalStock(2, 5)).toBe(0);
+  it('conserva stock negativo de una venta o recepción aún no sincronizada', () => {
+    expect(derivarLocalStock(2, 5)).toBe(-3);
   });
 
   it('sin ventas pendientes es el stock del servidor', () => {

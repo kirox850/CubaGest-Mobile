@@ -52,6 +52,15 @@ export interface SaleItem {
   total?: number;
 }
 
+export interface SalePayment {
+  method: string;
+  currency: string;
+  amount: number;
+  exchangeRate?: number | null;
+  rateSource?: 'same_currency' | 'automatic' | 'manual';
+  rateUpdatedAt?: string | number | null;
+}
+
 export interface Sale {
   id: string;
   businessId: string;
@@ -68,6 +77,7 @@ export interface Sale {
   // (CUP, USD, MLC, EUR, ZELLE, CLASICA...), así que es string libre.
   currency: string;
   payMethod: string;
+  payments?: SalePayment[];
   status: 'emitida' | 'anulada';
   userId?: string;
   /** Ubicación desde la que se vendió. Inmutable: el stock sale de aquí. */

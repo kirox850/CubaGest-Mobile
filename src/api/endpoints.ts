@@ -83,7 +83,7 @@ export const DashboardAPI = {
 
 // ─── Config de empresa: monedas y tasa de cambio (Fase 4) ─────────────────
 export const SettingsAPI = {
-  get: (): Promise<{ currencies: string[]; rateMode: 'manual' | 'eltoque'; manualRates: Record<string, number>; rates: Record<string, number>; ratesUpdatedAt?: string; cashToleranceMode?: CashToleranceMode; cashToleranceValue?: number; cashRequireApproval?: boolean }> =>
+  get: (): Promise<{ currencies: string[]; rateMode: 'manual' | 'eltoque'; manualRates: Record<string, number>; rates: Record<string, number>; ratesUpdatedAt?: string; taxRate?: number; cashToleranceMode?: CashToleranceMode; cashToleranceValue?: number; cashRequireApproval?: boolean }> =>
     apiFetch('/settings'),
   update: (body: { currencies?: string[]; rateMode?: 'manual' | 'eltoque'; manualRates?: Record<string, number>; cashToleranceMode?: CashToleranceMode; cashToleranceValue?: number; cashRequireApproval?: boolean }): Promise<unknown> =>
     apiFetch('/settings', { method: 'PUT', body }),
@@ -101,6 +101,34 @@ export const DiscountsAPI = {
 // ─── Referidos ────────────────────────────────────────────────────────────
 export const ReferralsAPI = {
   my: (): Promise<{ code?: string; invited?: number; bonified?: number; pending?: number }> => apiFetch('/referrals'),
+};
+
+export interface AppNotification {
+  id: string;
+  type: string;
+  title: string;
+  body: string;
+  link: string | null;
+  data: Record<string, unknown> | null;
+  readAt: string | null;
+  createdAt: string;
+}
+
+export interface NativePushStatus {
+  expoServiceAvailable: boolean;
+  registered: boolean;
+  devices: Array<{ platform: 'ios' | 'android'; failures: number; lastOkAt: string | null; lastFailureAt: string | null }>;
+}
+
+export const NotificationsAPI = {
+  list: (): Promise<{ items: AppNotification[]; unread: number }> => apiFetch('/push/notifications?limit=30'),
+  markRead: (ids: string[] = [], all = false): Promise<unknown> =>
+    apiFetch('/push/notifications/read', { method: 'POST', body: all ? { all: true } : { ids } }),
+  nativeStatus: (): Promise<NativePushStatus> => apiFetch('/push/native/status'),
+  subscribeNative: (token: string, platform: 'ios' | 'android'): Promise<unknown> =>
+    apiFetch('/push/native/subscribe', { method: 'POST', body: { token, platform } }),
+  unsubscribeNative: (token: string): Promise<unknown> =>
+    apiFetch('/push/native/unsubscribe', { method: 'POST', body: { token } }),
 };
 
 export const ProductsAPI = {
@@ -146,6 +174,7 @@ export const AccountingAPI = {
     const qs = new URLSearchParams(params).toString();
     return apiFetch(`/accounting/income${qs ? `?${qs}` : ''}`);
   },
+  treasury: (): Promise<{ balances: Record<string, number>; movements: any[] }> => apiFetch('/accounting/treasury'),
 };
 
 export const ExpensesAPI = {
@@ -153,7 +182,7 @@ export const ExpensesAPI = {
     const qs = new URLSearchParams(params).toString();
     return apiFetch(`/accounting/expenses${qs ? `?${qs}` : ''}`);
   },
-  create: (expense: Partial<Expense>): Promise<Expense> =>
+  create: (expense: Partial<Expense> & { clientExpenseId?: string; businessAt?: string | number; fundingSource?: 'caja_fuerte' | 'otra'; currency?: string }): Promise<Expense> =>
     apiFetch('/accounting/expenses', { method: 'POST', body: expense as Record<string, unknown> }),
   remove: (id: string): Promise<unknown> => apiFetch(`/accounting/expenses/${id}`, { method: 'DELETE' }),
 };
@@ -198,10 +227,11 @@ export const ClosingAPI = {
     notes?: string,
     items?: { productId: string; contado: number }[],
     businessAt?: string,
+    clientReadingId?: string,
   ): Promise<InventoryReading> =>
     apiFetch('/closing/readings', {
       method: 'POST',
-      body: { locationId, notes, items, businessAt: businessAt ?? new Date().toISOString() },
+      body: { locationId, notes, items, businessAt: businessAt ?? new Date().toISOString(), clientReadingId },
     }),
   /**
    * El estado de la cadena de la caja: última foto, si falta el eslabón
@@ -223,6 +253,8 @@ export const ClosingAPI = {
     notes?: string;
     countedCash?: Record<string, number>;
     countedAt?: string;
+    clientClosingId?: string;
+    clientReadingId?: string;
   }): Promise<Closing> =>
     apiFetch('/closing/confirm', { method: 'POST', body }),
   retry: (id: string): Promise<{ cierre: Closing; recalculo: unknown }> =>
@@ -254,10 +286,11 @@ export const ShiftAPI = {
     locationId: string,
     baseCash?: Record<string, number>,
     items?: { productId: string; contado: number }[],
+    ids?: { clientShiftId?: string; clientReadingId?: string; businessAt?: string },
   ): Promise<{ shift: Shift }> =>
     apiFetch('/shift/start', {
       method: 'POST',
-      body: { locationId, baseCash, items, businessAt: new Date().toISOString() },
+      body: { locationId, baseCash, items, clientShiftId: ids?.clientShiftId, clientReadingId: ids?.clientReadingId, businessAt: ids?.businessAt ?? new Date().toISOString() },
     }),
   // Terminar turno ES cerrar el periodo: cuenta la caja, la cierra y concilia la
   // cadena. Es el mismo handler que la pantalla de cierres, no una vía aparte.
@@ -266,6 +299,8 @@ export const ShiftAPI = {
     countedCash?: Record<string, number>;
     countedAt?: string;
     notes?: string;
+    clientClosingId?: string;
+    clientReadingId?: string;
   }): Promise<{ closed: string }> =>
     apiFetch('/shift/end', {
       method: 'POST',
@@ -296,6 +331,8 @@ export const TransfersAPI = {
     items: { productId: string; qty: number }[];
     notes?: string;
     fromLocationId?: string;
+    clientTransferId?: string;
+    createdAt?: string | number;
   }): Promise<Transfer> =>
     apiFetch('/transfers', { method: 'POST', body }),
   approve: (id: string): Promise<unknown> => apiFetch(`/transfers/${id}/approve`, { method: 'POST' }),
@@ -328,7 +365,7 @@ export const CashMovementsAPI = {
     ).toString();
     return apiFetch(`/cash-movements${qs ? `?${qs}` : ''}`);
   },
-  create: (body: { locationId: string; type: 'entrada' | 'salida'; amount: number; currency: string; reason?: string; businessAt?: string }): Promise<CashMovement> =>
+  create: (body: { locationId: string; type: 'entrada' | 'salida'; amount: number; currency: string; reason?: string; businessAt?: string | number; clientMovementId?: string; purpose?: 'retiro' | 'caja_fuerte' }): Promise<CashMovement> =>
     apiFetch('/cash-movements', { method: 'POST', body: body as unknown as Record<string, unknown> }),
   decide: (id: string, decision: 'aprobar' | 'rechazar', note?: string): Promise<{ id: string; status: string }> =>
     apiFetch(`/cash-movements/${id}/decide`, { method: 'POST', body: { decision, note: note || undefined } }),

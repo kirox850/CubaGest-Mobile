@@ -17,6 +17,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ShiftAPI } from '../api/endpoints';
 import { isOfflineError } from '../api/client';
+import { enqueueOfflineOperation } from '../offline/offlineStore';
+import { generateUuid } from '../utils/uuid';
 import type { Shift, AssignedCaja, ShiftCurrentResponse } from '../types';
 
 const SHIFT_KEY = 'cubagest_shift';
@@ -87,7 +89,7 @@ export interface UseShiftValue {
   /** Aviso del servidor. NUNCA se trata como "no hay turno". */
   aviso: string | null;
   abrirTurno: (locationId: string, baseCash?: Record<string, number>, items?: { productId: string; contado: number }[]) => Promise<Shift | null>;
-  cerrarTurno: (payload?: { items?: any[]; countedCash?: Record<string, number>; notes?: string }) => Promise<void>;
+  cerrarTurno: (payload?: { items?: any[]; countedCash?: Record<string, number>; notes?: string; countedAt?: string }) => Promise<void>;
   refresh: () => Promise<void>;
 }
 
@@ -145,8 +147,27 @@ export function useShift(userId: string | undefined): UseShiftValue {
   const abrirTurno = useCallback(async (locationId: string, baseCash?: Record<string, number>, items?: { productId: string; contado: number }[]) => {
     const uid = usuarioRef.current;
     if (!uid) throw new Error('Inicia sesión para abrir turno');
-    const r = await ShiftAPI.start(locationId, baseCash, items);
-    const nuevo: Shift | null = r?.shift ?? null;
+    const businessAt = new Date().toISOString();
+    const clientShiftId = generateUuid();
+    const clientReadingId = generateUuid();
+    let nuevo: Shift | null;
+    try {
+      const r = await ShiftAPI.start(locationId, baseCash, items, { clientShiftId, clientReadingId, businessAt });
+      nuevo = r?.shift ?? null;
+    } catch (error) {
+      if (!isOfflineError(error)) throw error;
+      await enqueueOfflineOperation('shift_open', {
+        locationId, baseCash: baseCash || {}, items: items || [], clientShiftId, clientReadingId, businessAt,
+      }, Date.parse(businessAt), clientShiftId);
+      nuevo = {
+        id: `offline-${clientShiftId}`,
+        locationId,
+        locationName: cajas.find((c) => c.id === locationId)?.name || 'Caja sin conexión',
+        startedAt: businessAt,
+        openingReadingId: clientReadingId,
+        baseCash: baseCash || {},
+      };
+    }
     setShift(nuevo);
     setAviso(null);
     // El turno se guarda en cuanto se abre. Si la respuesta se pierde después,
@@ -159,15 +180,30 @@ export function useShift(userId: string | undefined): UseShiftValue {
     items?: any[];
     countedCash?: Record<string, number>;
     notes?: string;
+    countedAt?: string;
   }) => {
     const uid = usuarioRef.current;
-    await ShiftAPI.end(payload);
+    const businessAt = payload?.countedAt || new Date().toISOString();
+    const clientClosingId = generateUuid();
+    const clientReadingId = generateUuid();
+    try {
+      await ShiftAPI.end({ ...payload, countedAt: businessAt, clientClosingId, clientReadingId });
+    } catch (error) {
+      if (!isOfflineError(error)) throw error;
+      await enqueueOfflineOperation('shift_close', {
+        ...payload,
+        initialReadingId: shift?.openingReadingId,
+        clientClosingId,
+        clientReadingId,
+        countedAt: businessAt,
+      }, Date.parse(businessAt), clientClosingId);
+    }
     setShift(null);
     // Las cajas NO se borran al cerrar el turno: siguen siendo las del cajero.
     // Pasarlas como [] vaciaba la lista y dejaba la app sin saber dónde puede
     // abrir el siguiente turno, que es justo lo que hace falta al cerrar uno.
     if (uid) await persistShift(uid, null, cajas);
-  }, [cajas]);
+  }, [cajas, shift]);
 
   return { shift, cajas, cargando, offline, aviso, abrirTurno, cerrarTurno, refresh: cargar };
 }
