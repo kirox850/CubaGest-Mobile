@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, ScrollView, DeviceEventEmitter } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, ScrollView, DeviceEventEmitter, Modal } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { isOfflineError } from '../api/client';
 import { LocationsAPI, SalesAPI, SettingsAPI, DiscountsAPI } from '../api/endpoints';
@@ -21,6 +21,7 @@ import {
 } from '../offline/offlineStore';
 import { activateNamespace, getActiveNamespace, UNKNOWN_LOCATION } from '../offline/namespace';
 import { generateUuid } from '../utils/uuid';
+import { calculateRemainingPayment } from '../utils/paymentRemainder';
 
 const fmt = (n: number) => Number(n || 0).toFixed(2);
 
@@ -68,6 +69,7 @@ export default function POSScreen() {
   const [cart, setCart] = useState<Record<string, number>>({});
   const [cartRestore, setCartRestore] = useState<OfflineCartSnapshot | null>(null);
   const [cartReady, setCartReady] = useState(false);
+  const [checkoutOpen, setCheckoutOpen] = useState(false);
   const restoredCartLocation = React.useRef('');
   const [paymentLines, setPaymentLines] = useState<any[]>([
     { id: 'payment-1', method: 'efectivo', currency: 'CUP', amount: '', rateSource: 'automatic', exchangeRate: '' },
@@ -429,12 +431,19 @@ export default function POSScreen() {
   const paymentsMatch = effectivePayments.length > 0 && effectivePayments.every((p) =>
     Number(p.amount) > 0 && Number.isFinite(Number(p.exchangeRate)) && Number(p.exchangeRate) > 0,
   ) && Math.abs(Math.round(paidTotal * 100) / 100 - Math.round(total * 100) / 100) <= 0.01;
+  const hasEnteredForeignPayment = effectivePayments.some((p) =>
+    p.currency !== saleCurrency && Number(p.amount) > 0,
+  );
+  const remainingForBasePayment = (paymentId: string) => {
+    if (!hasEnteredForeignPayment) return null;
+    return calculateRemainingPayment(total, effectivePayments, paymentId);
+  };
 
   const checkout = async () => {
     if (cartItems.length === 0) {
       return showError('Carrito vacio: ' + 'Agrega al menos un producto');
     }
-    if (needsTransfer && (!clientName || !clientNit || !clientPhone)) {
+    if (needsTransfer && (!clientName.trim() || !clientNit.trim() || !clientPhone.trim())) {
       return showError('Datos requeridos: ' + 'Para transferencia completa nombre, carnet y telefono');
     }
     if (online && needsLocationPicker && !myLocationId) {
@@ -544,6 +553,7 @@ export default function POSScreen() {
       }
 
       setCart({});
+      setCheckoutOpen(false);
       setLineDiscounts({});
       setClientName(''); setClientNit(''); setClientPhone('');
       setSaleDiscountId('');
@@ -769,12 +779,75 @@ export default function POSScreen() {
         />
       </View>
 
-      {/* Carrito fijo abajo */}
+      {/* Carrito resumido: los ajustes del cobro quedan dentro del modal. */}
       <View style={styles.cartBox}>
         <View style={styles.cartHeader}>
           <Text style={styles.cartTitle}>Carrito</Text>
           <View style={styles.cartBadge}>
-            <Text style={styles.cartBadgeText}>{cartItems.length}</Text>
+            <Text style={styles.cartBadgeText}>{cartItems.reduce((sum, item) => sum + item.qty, 0)}</Text>
+          </View>
+        </View>
+        {cartItems.length === 0 ? (
+          <Text style={{ color: colors.textMuted, fontSize: 12 }}>Agrega productos para comenzar una venta.</Text>
+        ) : (
+          <ScrollView style={{ maxHeight: 105 }}>
+            {cartItems.map((item) => (
+              <View key={item.product.id} style={styles.cartLine}>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={styles.cartLineText} numberOfLines={1}>{item.product.name}</Text>
+                  <Text style={{ color: colors.textMuted, fontSize: 11, marginTop: 2 }}>
+                    {item.qty} × {curSym}{fmt(Number(item.product.price))}
+                  </Text>
+                </View>
+                <View style={styles.cartItemActions}>
+                  <TouchableOpacity style={styles.qtyBtn} onPress={() => setQty(item.product, item.qty - 1)}>
+                    <Icon name="minus" size={12} color={colors.text} />
+                  </TouchableOpacity>
+                  <Text style={styles.qtyVal}>{item.qty}</Text>
+                  <TouchableOpacity style={styles.qtyBtnPlus} onPress={() => setQty(item.product, item.qty + 1)}>
+                    <Icon name="plus" size={12} color="#ffffff" />
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={() => setQty(item.product, 0)} hitSlop={8} style={{ padding: 5 }}>
+                    <Icon name="close" size={14} color={colors.danger} />
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ))}
+          </ScrollView>
+        )}
+        <View style={styles.footer}>
+          <Text style={styles.total}>Total: {curSym}{fmt(total)} {saleCurrency}</Text>
+          <TouchableOpacity
+            style={[styles.checkoutBtn, cartItems.length === 0 && { opacity: 0.5 }]}
+            onPress={() => setCheckoutOpen(true)}
+            disabled={cartItems.length === 0}
+          >
+            <Icon name="cart" size={15} color="#ffffff" />
+            <Text style={styles.checkoutText}>Vender</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      <Modal visible={checkoutOpen} transparent animationType="slide" onRequestClose={() => { if (!saving) setCheckoutOpen(false); }}>
+        <View style={styles.checkoutOverlay}>
+          <View style={styles.checkoutModal}>
+            <View style={styles.checkoutHeader}>
+              <Text style={styles.checkoutTitle}>Completar venta</Text>
+              <TouchableOpacity onPress={() => { if (!saving) setCheckoutOpen(false); }} disabled={saving} hitSlop={8} style={{ padding: 5 }}>
+                <Icon name="close" size={19} color={colors.textMuted} />
+              </TouchableOpacity>
+            </View>
+            {!online && (
+              <View style={styles.checkoutOfflineNotice}>
+                <Text style={styles.checkoutOfflineText}>Sin conexión: la venta se guardará en este dispositivo y se sincronizará después.</Text>
+              </View>
+            )}
+            <ScrollView style={styles.checkoutScroll} contentContainerStyle={styles.checkoutContent} keyboardShouldPersistTaps="handled" nestedScrollEnabled>
+        <View style={styles.cartBox}>
+        <View style={styles.cartHeader}>
+          <Text style={styles.cartTitle}>Productos de la venta</Text>
+          <View style={styles.cartBadge}>
+            <Text style={styles.cartBadgeText}>{cartItems.reduce((sum, item) => sum + item.qty, 0)}</Text>
           </View>
         </View>
 
@@ -854,6 +927,11 @@ export default function POSScreen() {
               const manual = same ? 1 : configuredManualRate(line.currency, saleCurrency);
               const source = same ? 'same_currency' : (line.rateSource === 'manual' || !auto ? 'manual' : 'automatic');
               const shownRate = same ? 1 : source === 'automatic' ? auto : Number(line.exchangeRate || manual || 0);
+              const remaining = same ? remainingForBasePayment(line.id) : null;
+              const enteredForeignRateMissing = effectivePayments.some((p) =>
+                p.id !== line.id && p.currency !== saleCurrency && Number(p.amount) > 0 &&
+                (!Number.isFinite(Number(p.exchangeRate)) || Number(p.exchangeRate) <= 0),
+              );
               return (
                 <View key={line.id} style={{ gap: 6, paddingVertical: 7, borderTopWidth: index ? 1 : 0, borderTopColor: colors.border }}>
                   <View style={{ flexDirection: 'row', gap: 8 }}>
@@ -890,6 +968,23 @@ export default function POSScreen() {
                     )}
                     {paymentLines.length > 1 && <TouchableOpacity onPress={() => setPaymentLines((prev) => prev.filter((p) => p.id !== line.id))} style={{ padding: 8 }}><Text style={{ color: colors.danger }}>Quitar</Text></TouchableOpacity>}
                   </View>
+                  {same && hasEnteredForeignPayment && (
+                    <View style={{ alignItems: 'flex-start', gap: 4 }}>
+                      <TouchableOpacity
+                        style={[styles.calcRemainingBtn, remaining === null && { opacity: 0.45 }]}
+                        disabled={remaining === null}
+                        onPress={() => setPaymentLines((prev) => prev.map((p) => p.id === line.id ? { ...p, amount: String(remaining) } : p))}
+                      >
+                        <Icon name="check" size={13} color={colors.primary} />
+                        <Text style={styles.calcRemainingText}>Calcular restante</Text>
+                      </TouchableOpacity>
+                      {remaining === null && (
+                        <Text style={{ color: colors.warning, fontSize: 11 }}>
+                          {enteredForeignRateMissing ? 'Completa una tasa válida para calcular.' : 'Los otros pagos cubren el total; revisa los importes.'}
+                        </Text>
+                      )}
+                    </View>
+                  )}
                 </View>
               );
             })}
@@ -929,19 +1024,25 @@ export default function POSScreen() {
           </View>
         )}
 
-        {/* Total y cobrar — botón VERDE con check (igual que la web) */}
-        <View style={styles.footer}>
-          <Text style={styles.total}>Total: {curSym}{fmt(total)} {saleCurrency}</Text>
-          <TouchableOpacity
-            style={[styles.checkoutBtn, (saving || cartItems.length === 0) && { opacity: 0.6 }]}
-            onPress={checkout}
-            disabled={saving || cartItems.length === 0}
-          >
-            <Icon name="check" size={15} color="#ffffff" />
-            <Text style={styles.checkoutText}>{saving ? '...' : online ? 'Cobrar' : 'Cobrar (offline)'}</Text>
-          </TouchableOpacity>
-        </View>
       </View>
+            </ScrollView>
+            <View style={styles.checkoutFooter}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.checkoutFooterLabel}>Total</Text>
+                <Text style={styles.checkoutFooterTotal}>{curSym}{fmt(total)} {saleCurrency}</Text>
+              </View>
+              <TouchableOpacity
+                style={[styles.checkoutBtn, (saving || cartItems.length === 0) && { opacity: 0.6 }]}
+                onPress={checkout}
+                disabled={saving || cartItems.length === 0}
+              >
+                <Icon name="check" size={15} color="#ffffff" />
+                <Text style={styles.checkoutText}>{saving ? '...' : online ? 'Cobrar' : 'Cobrar (offline)'}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -986,6 +1087,7 @@ const createStyles = () => StyleSheet.create({
   cartLine: { flexDirection: 'row', justifyContent: 'space-between', borderBottomWidth: 1, borderBottomColor: colors.border, paddingBottom: 4, marginBottom: 4 },
   cartLineText: { fontSize: 12, color: colors.text },
   cartLineAmt: { fontSize: 12, fontWeight: '700', color: colors.text },
+  cartItemActions: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   optsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, alignItems: 'flex-end' },
   discRow: { flexDirection: 'row', justifyContent: 'space-between' },
   discRowText: { fontSize: 12, color: colors.danger },
@@ -994,6 +1096,19 @@ const createStyles = () => StyleSheet.create({
   total: { fontSize: 18, fontWeight: '800', color: colors.text },
   checkoutBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.success, paddingVertical: 10, paddingHorizontal: 20, borderRadius: 12 },
   checkoutText: { color: '#fff', fontWeight: '700', fontSize: 14 },
+  checkoutOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.58)', alignItems: 'center', justifyContent: 'center', padding: 10 },
+  checkoutModal: { width: '100%', maxWidth: 640, maxHeight: '96%', flex: 1, backgroundColor: colors.bg, borderRadius: 18, borderWidth: 1, borderColor: colors.border },
+  checkoutHeader: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: colors.border, backgroundColor: colors.bgCard },
+  checkoutTitle: { flex: 1, fontSize: 17, fontWeight: '800', color: colors.text },
+  checkoutOfflineNotice: { paddingHorizontal: 14, paddingVertical: 8, backgroundColor: colors.warningBg, borderBottomWidth: 1, borderBottomColor: colors.warningBorder },
+  checkoutOfflineText: { color: colors.warningTextDark, fontSize: 12, fontWeight: '600' },
+  checkoutScroll: { flex: 1, minHeight: 0 },
+  checkoutContent: { paddingTop: 12, paddingBottom: 6 },
+  checkoutFooter: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 12, borderTopWidth: 1, borderTopColor: colors.border, backgroundColor: colors.bgCard },
+  checkoutFooterLabel: { color: colors.textMuted, fontSize: 11 },
+  checkoutFooterTotal: { color: colors.text, fontSize: 17, fontWeight: '800', marginTop: 2 },
+  calcRemainingBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 7, paddingHorizontal: 10, borderRadius: 8, backgroundColor: colors.primaryTint, borderWidth: 1, borderColor: colors.primaryTintB },
+  calcRemainingText: { color: colors.primary, fontSize: 12, fontWeight: '700' },
 });
 
 // Estilos VIVOS: se reconstruyen cuando cambia el tema (dark mode).

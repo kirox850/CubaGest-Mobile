@@ -16,7 +16,8 @@ local) y todo lo demás lo decide el servidor. Los cálculos del servidor están
 documentados en el backend, no aquí.
 
 - Entry point: `index.js` → `registerRootComponent(App)` → `src/App.tsx`
-- Estado de verificación de este README: typecheck limpio, **261 tests / 27
+- Cambios compartidos: [CHANGELOG.md](CHANGELOG.md).
+- Estado de verificación de este README: typecheck limpio, **266 tests / 28
   suites en verde**.
 
 ---
@@ -93,7 +94,7 @@ Scripts literales de `package.json`:
 | **Añadir una dependencia** | `npx expo install <pkg>` | **Obligatorio.** Ver §2.1 |
 | Correr | `npm start` (= `expo start`) | Levanta Metro, escaneas el QR con Expo Go |
 | Correr en emulador | `npm run android` / `npm run ios` | Necesita emulador/simulador |
-| Tests | `npm test` (= `jest`) | 27 suites / 261 tests |
+| Tests | `npm test` (= `jest`) | 28 suites / 266 tests |
 | Tests en modo CI | `npx jest --ci` | Sin watch, un solo pase |
 | Un test | `npx jest src/config/__tests__/configuracion.test.ts` | |
 | Tipos | `npm run typecheck` | `tsc --noEmit`, limpio hoy |
@@ -864,7 +865,7 @@ Cada una es una línea: qué sirve. `src/screens/`.
 | `LoginScreen.tsx` | Acceso con el fondo navy y el hero difuminado, tarjeta 3D, recuperación de contraseña y acceso al registro |
 | `RegisterScreen.tsx` | Alta de empresa con trial de 30 días vía `POST /auth/register`, con código de referido |
 | `DashboardScreen.tsx` | Resumen del negocio (ventas de hoy, etc.) + gráfico de área con rangos 7d/30d/90d/180d; funciona con caché sin red |
-| `POSScreen.tsx` | Punto de venta: catálogo de **su** caja, carrito, cobro mixto, descuentos, turno, y **cola offline** con folio `LOCAL-XXXX` |
+| `POSScreen.tsx` | Punto de venta: catálogo y carrito editables; **Vender** abre el checkout de descuentos/pagos mixtos, con cálculo del restante y cola offline `LOCAL-XXXX` |
 | `FacturacionScreen.tsx` | Facturas: lista, anular, CSV, y **fusión servidor + cola local**; botón "Sincronizar ahora" |
 | `InventarioScreen.tsx` | Productos con stock **por ubicación**, alta/edición, ajuste de stock y envío a CSV |
 | `CierreCajaScreen.tsx` | El cierre, en 4 vistas (`list` → `selectReading` → `validate` → `detail`): lista, lectura de apertura, validación de stock + dinero, y detalle con pendientes |
@@ -930,6 +931,11 @@ un identificador para que reintentar no duplique ventas ni movimientos.
   de tasa manual por venta; el detalle aplicado se conserva. Un descuento cuyo
   máximo se exceda por ventas offline no invalida esas ventas: al sincronizar se
   registra el uso y se desactiva para ventas posteriores.
+- **Cobro en el POS**: el catálogo y el carrito permanecen en la pantalla
+  principal. **Vender** abre una ventana nativa con productos, descuentos, moneda
+  de factura, pagos, tasas y datos de transferencia; cerrar la ventana conserva
+  el borrador. En una línea de la moneda de venta, **Calcular restante** completa
+  el importe después de convertir los otros pagos con sus tasas seleccionadas.
 - **Anulación y traspaso**: anular una factura devuelve el inventario en la fecha
   original de la venta para que el recálculo corrija las fotos históricas; no
   aumenta directamente el stock presente. Un traspaso aprobado se contabiliza
@@ -1190,11 +1196,11 @@ splash.
 ```bash
 npm test                       # jest
 npx jest --ci                  # un pase, sin watch (lo que usa CI)
-npx jest --ci --listTests      # 27 rutas
+npx jest --ci --listTests      # 28 rutas
 npx jest src/config/__tests__/configuracion.test.ts
 ```
 
-**Estado verificado el 6 de octubre de 2026: 27 suites, 261 tests, 27/27 en verde.**
+**Estado verificado el 8 de octubre de 2026: 28 suites, 266 tests, 28/28 en verde.**
 
 | Suite | Tests | Qué fija |
 |---|---|---|
@@ -1225,6 +1231,7 @@ npx jest src/config/__tests__/configuracion.test.ts
 | `offline/adoptUnscoped` | 5 | no adopta datos de otra cuenta (uno de ellos usa `test()` en vez de `it()`) |
 | `config/noSystemAlert` | 4 | ningún `Alert.alert` sobrevive |
 | `config/noInlineColors` | 4 | ningún color suelto fuera de las excepciones |
+| `utils/paymentRemainder` | 5 | resto con varias tasas, línea base excluida y validación |
 
 ### 14.2 Por qué el preset de Jest es `react-native` y no `jest-expo`
 
