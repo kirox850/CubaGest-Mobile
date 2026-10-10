@@ -2,10 +2,10 @@
 // Mismas métricas que la web: inputs padding 9/12 radius 12 fontSize 14,
 // botones padding 9/18 radius 12, Field con label uppercase 12/600,
 // modal radius 16 con header 20/24 y título 17/700, StatCard 22/24 radius 16.
-import React, { useEffect, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import {
   View, Text, TextInput, StyleSheet, ActivityIndicator, AccessibilityInfo, Easing, Animated,
-  TouchableOpacity, Modal, Pressable, ScrollView,
+  TouchableOpacity, Modal, Pressable, ScrollView, BackHandler, useWindowDimensions,
 } from 'react-native';
 import Icon, { type IconName } from './Icon';
 import { colors, radius, shadow, NAVY, themeRef } from '../config/theme';
@@ -30,38 +30,99 @@ export const Inp = (props: React.ComponentProps<typeof TextInput>) => (
   />
 );
 
-// ─── SELECT TIPO DROPDOWN (menú desplegable, como el <select> de la web) ────
-// El Picker de react-native en iOS SIEMPRE muestra la rueda giratoria
-// (216pt) — se ve mal y el texto se desborda. Este dropdown abre un MENÚ de
-// opciones (lista con check en la seleccionada), igual que los menús de
-// selección de la web, y funciona idéntico en iOS y Android.
-// ─── SELECT (el desplegable de la app) ───────────────────────────────────────
-//
-// ANTES ERA UN `<Modal>`, y eso fue lo que rompió cuatro pantallas.
-//
-// Un `Modal` en react-native no es una caja dentro de la pantalla: es una
-// VENTANA DEL SISTEMA. Android da a cada una su propia "tarea" en el botón
-// atrás, y el botón atrás no se propaga al modal de abajo, sino que cierra el
-// de arriba. El resultado, en Contabilidad, Facturación y Usuarios, era esto:
-//
-//   1. Se abre un formulario.
-//   2. Se abre un `Sel` dentro.
-//   3. Se elige la opción. Se cierra el `Sel`… y con él, el formulario.
-//
-// Y en iOS la lista del desplegable se cuenta como una tercera ventana, así que
-// el "¿salir sin guardar?" se dispara con un paso de más. Estos son bugs que
-// no se ven en un emulador y sí en un teléfono.
-//
-// La solución no es cuidar el orden de cierre: es no usar una ventana del
-// sistema para algo que no es una ventana. El desplegable se dibuja CON
-// `absolute` dentro del árbol normal, así que hereda el ciclo de vida de la
-// pantalla que lo contiene y el botón atrás lo cierra en el orden correcto.
-//
-// La capa de sombra es un `Pressable` a pantalla completa: sin ella, al pulsar
-// fuera no se cerraría, y con `position:'absolute'` se lleva los toques del
-// resto de la pantalla mientras está abierto. El zIndex alto es para que quede
-// por encima de las tarjetas, que en varias pantallas ya tienen `overflow`
-// propio.
+// ─── SELECT: lista en una capa raíz, no dentro del campo que la dispara ───────
+// El menú inline podía quedar recortado o detrás de tarjetas. Esta capa es una
+// hermana de la pantalla completa; los formularios que ya viven en un Modal
+// nativo montan otro provider dentro de ese Modal y conservan el mismo patrón.
+type SelItem = { label: string; value: string };
+type SelRequest = { items: SelItem[]; value: string; onValueChange: (value: string) => void };
+const SelectOverlayContext = createContext<((request: SelRequest) => void) | null>(null);
+let activeSelectCloser: (() => void) | null = null;
+
+/** Permite que un Modal nativo cierre primero su lista flotante al pulsar atrás. */
+export function closeSelectOverlayIfOpen(): boolean {
+  if (!activeSelectCloser) return false;
+  activeSelectCloser();
+  return true;
+}
+
+export function SelectOverlayProvider({ children }: { children: React.ReactNode }) {
+  const [request, setRequest] = useState<SelRequest | null>(null);
+  const { height } = useWindowDimensions();
+  const open = useCallback((next: SelRequest) => setRequest(next), []);
+  const close = useCallback(() => {
+    activeSelectCloser = null;
+    setRequest(null);
+  }, []);
+
+  useEffect(() => {
+    if (!request) return;
+    activeSelectCloser = close;
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      close();
+      return true;
+    });
+    return () => {
+      subscription.remove();
+      if (activeSelectCloser === close) activeSelectCloser = null;
+    };
+  }, [request, close]);
+
+  return (
+    <SelectOverlayContext.Provider value={open}>
+      <View style={{ flex: 1 }}>
+        {children}
+        {request && (
+          <View pointerEvents="box-none" style={[StyleSheet.absoluteFill, { zIndex: 10000, elevation: 10000, justifyContent: 'center', padding: 24 }]}>
+            <Pressable
+              style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.48)' }]}
+              accessibilityLabel="Cerrar la lista"
+              onPress={close}
+            />
+            <View style={{
+              alignSelf: 'center', width: '100%', maxWidth: 420, maxHeight: Math.min(height * 0.72, 560),
+              backgroundColor: colors.bgCard, borderRadius: 14, borderWidth: 1, borderColor: colors.border,
+              overflow: 'hidden', ...shadow.md,
+            }}>
+              <ScrollView bounces={false} keyboardShouldPersistTaps="handled">
+                {request.items.length > 0 ? request.items.map((item) => {
+                  const selected = item.value === request.value;
+                  return (
+                    <TouchableOpacity
+                      key={item.value || '__empty'}
+                      onPress={() => {
+                        const select = request.onValueChange;
+                        close();
+                        select(item.value);
+                      }}
+                      activeOpacity={0.65}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected }}
+                      style={{
+                        minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: 10,
+                        paddingVertical: 12, paddingHorizontal: 16,
+                        borderBottomWidth: 1, borderBottomColor: colors.borderLight,
+                        backgroundColor: selected ? colors.primaryTint : colors.bgCard,
+                      }}
+                    >
+                      <Text style={{ flex: 1, fontSize: 15, color: selected ? colors.primary : colors.text, fontWeight: selected ? '700' : '400' }}>
+                        {item.label}
+                      </Text>
+                      {selected && <Icon name="check" size={15} color={colors.primary} />}
+                    </TouchableOpacity>
+                  );
+                }) : (
+                  <Text style={{ padding: 18, color: colors.textMuted, textAlign: 'center' }}>No hay opciones disponibles</Text>
+                )}
+              </ScrollView>
+            </View>
+          </View>
+        )}
+      </View>
+    </SelectOverlayContext.Provider>
+  );
+}
+
 export const Sel = ({ items, value, onValueChange, style, placeholder }: {
   items: { label: string; value: string }[];
   value: string;
@@ -69,21 +130,22 @@ export const Sel = ({ items, value, onValueChange, style, placeholder }: {
   style?: object;
   placeholder?: string;
 }) => {
-  const [open, setOpen] = useState(false);
+  const openMenu = useContext(SelectOverlayContext);
   const current = items.find((i) => i.value === value);
 
   return (
     <View style={style}>
       <TouchableOpacity
-        onPress={() => setOpen(true)}
+        onPress={() => openMenu?.({ items, value, onValueChange })}
+        disabled={items.length === 0}
         activeOpacity={0.7}
         accessibilityRole="combobox"
-        accessibilityState={{ expanded: open }}
+        accessibilityState={{ expanded: false, disabled: items.length === 0 }}
         style={{
           flexDirection: 'row', alignItems: 'center', gap: 6,
           paddingVertical: 9, paddingHorizontal: 12,
           borderWidth: 1, borderColor: colors.inputBorder, borderRadius: 12,
-          backgroundColor: colors.inputBg, minHeight: 38,
+          backgroundColor: colors.inputBg, minHeight: 38, opacity: items.length === 0 ? 0.55 : 1,
         }}
       >
         <Text numberOfLines={1} style={{ flexShrink: 1, fontSize: 14, color: colors.text }}>
@@ -91,55 +153,6 @@ export const Sel = ({ items, value, onValueChange, style, placeholder }: {
         </Text>
         <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: -2 }}>▼</Text>
       </TouchableOpacity>
-
-      {open && (
-        <View
-          style={[
-            // `absoluteFillObject` no existe en los tipos de esta versión de RN,
-            // y el componente tiene que poder hacer `position: fixed` sin
-            // depender de una hoja de estilos global que aquí no hay.
-            { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
-            { zIndex: 90, justifyContent: 'center', padding: 32 },
-          ]}
-        >
-          <Pressable
-            style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.45)' }}
-            accessibilityLabel="Cerrar la lista"
-            onPress={() => setOpen(false)}
-          />
-          <View
-            style={{
-              backgroundColor: colors.bgCard, borderRadius: 14, borderWidth: 1, borderColor: colors.border,
-              maxHeight: '70%', width: '100%', maxWidth: 340, overflow: 'hidden',
-              ...shadow.md,
-            }}
-          >
-            <ScrollView bounces={false}>
-              {items.map((it) => {
-                const on = it.value === value;
-                return (
-                  <TouchableOpacity
-                    key={it.value}
-                    onPress={() => { onValueChange(it.value); setOpen(false); }}
-                    activeOpacity={0.6}
-                    style={{
-                      flexDirection: 'row', alignItems: 'center', gap: 10,
-                      paddingVertical: 13, paddingHorizontal: 16,
-                      borderBottomWidth: 1, borderBottomColor: colors.borderLight,
-                      backgroundColor: on ? colors.primaryTint : 'transparent',
-                    }}
-                  >
-                    <Text style={{ flex: 1, fontSize: 15, color: on ? colors.primary : colors.text, fontWeight: on ? '700' : '400' }}>
-                      {it.label}
-                    </Text>
-                    {on && <Icon name="check" size={15} color={colors.primary} />}
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
-          </View>
-        </View>
-      )}
     </View>
   );
 };

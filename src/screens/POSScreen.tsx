@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, ScrollView, DeviceEventEmitter, Modal } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, ScrollView, DeviceEventEmitter, Modal, useWindowDimensions } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { isOfflineError } from '../api/client';
 import { LocationsAPI, SalesAPI, SettingsAPI, DiscountsAPI } from '../api/endpoints';
@@ -11,7 +11,7 @@ import { useAuth } from '../context/AuthContext';
 import { useSync } from '../context/SyncContext';
 import { colors, themeRef } from '../config/theme';
 import { PAYMENT_METHODS_BY_CURRENCY, CURRENCY_SYMBOLS } from '../config/roles';
-import { EmptyState, ErrorBanner, Sel, Inp, Field, Skeleton, showToast } from '../components/UI';
+import { EmptyState, ErrorBanner, Sel, Inp, Field, Skeleton, showToast, SelectOverlayProvider, closeSelectOverlayIfOpen } from '../components/UI';
 import { showConfirm, showError } from '../components/dialogs';
 import Icon from '../components/Icon';
 import {
@@ -43,6 +43,8 @@ type PosProduct = {
 
 export default function POSScreen() {
   const { user, online } = useAuth();
+  const { width: screenWidth } = useWindowDimensions();
+  const fullScreenCheckout = screenWidth < 640;
   const { refresh: refreshSync, pendingCount } = useSync();
   // Aviso único: se venderó sin conexión sin ubicación conocida en el teléfono.
   const warnedUnknownLocation = React.useRef(false);
@@ -192,17 +194,17 @@ export default function POSScreen() {
   const load = useCallback(async (opts: { locationId?: string } = {}) => {
     setError('');
     setCargandoCatalogo(true);
+    // La ubicación indicada por el llamador manda: setMyLocationId es
+    // asíncrono, así que leer el estado antes de resolver el namespace puede
+    // apuntar al catálogo de otra caja.
+    const locationId = opts.locationId || myLocationId;
     try {
+      if (user) await activateNamespace(user, locationId || undefined);
       if (!online) {
         const cached = await getOfflineProducts();
         setProducts(cached.filter((p) => p.active).map((p) => ({ ...p, isOfflineRow: true })));
         return;
       }
-
-      // La ubicación indicada por el llamador manda: setMyLocationId es
-      // asíncrono, así que leer `myLocationId` aquí seguiría viendo el valor
-      // anterior y el admin acabaría viendo el stock de la caja equivocada.
-      const locationId = opts.locationId || myLocationId;
 
       if (!locationId) {
         setProducts([]);
@@ -211,7 +213,7 @@ export default function POSScreen() {
 
       // Namespace offline = cuenta + ubicación. A partir de aquí, catálogo y
       // cola pertenecen a ESTA caja/almacén (nunca se mezclan entre cuentas).
-      await activateNamespace(user, locationId);
+      if (user) await activateNamespace(user, locationId);
 
       const { items } = await LocationsAPI.stock(locationId);
       setProducts(items.filter((p: any) => p.active));
@@ -221,6 +223,7 @@ export default function POSScreen() {
       void cacheProducts(items, locationId).catch(() => {});
     } catch (err) {
       // Falló la red/permisos: caemos al cache offline sin bloquear la venta.
+      if (user) await activateNamespace(user, locationId || undefined).catch(() => {});
       const cached = await getOfflineProducts();
       if (cached.length > 0) {
         setProducts(cached.filter((p) => p.active).map((p) => ({ ...p, isOfflineRow: true })));
@@ -828,9 +831,13 @@ export default function POSScreen() {
         </View>
       </View>
 
-      <Modal visible={checkoutOpen} transparent animationType="slide" onRequestClose={() => { if (!saving) setCheckoutOpen(false); }}>
-        <View style={styles.checkoutOverlay}>
-          <View style={styles.checkoutModal}>
+      <Modal visible={checkoutOpen} transparent animationType="slide" onRequestClose={() => {
+        if (closeSelectOverlayIfOpen()) return;
+        if (!saving) setCheckoutOpen(false);
+      }}>
+        <SelectOverlayProvider>
+        <View style={[styles.checkoutOverlay, fullScreenCheckout && styles.checkoutOverlayFull]}>
+          <View style={[styles.checkoutModal, fullScreenCheckout && styles.checkoutModalFull]}>
             <View style={styles.checkoutHeader}>
               <Text style={styles.checkoutTitle}>Completar venta</Text>
               <TouchableOpacity onPress={() => { if (!saving) setCheckoutOpen(false); }} disabled={saving} hitSlop={8} style={{ padding: 5 }}>
@@ -842,7 +849,7 @@ export default function POSScreen() {
                 <Text style={styles.checkoutOfflineText}>Sin conexión: la venta se guardará en este dispositivo y se sincronizará después.</Text>
               </View>
             )}
-            <ScrollView style={styles.checkoutScroll} contentContainerStyle={styles.checkoutContent} keyboardShouldPersistTaps="handled" nestedScrollEnabled>
+          <ScrollView style={styles.checkoutScroll} contentContainerStyle={styles.checkoutContent} keyboardShouldPersistTaps="handled">
         <View style={styles.cartBox}>
         <View style={styles.cartHeader}>
           <Text style={styles.cartTitle}>Productos de la venta</Text>
@@ -852,7 +859,7 @@ export default function POSScreen() {
         </View>
 
         {cartItems.length > 0 && (
-          <ScrollView style={{ maxHeight: 110 }}>
+          <View>
             {cartItems.map((l) => {
               const ld = lineDiscount(l.product.id);
               return (
@@ -879,7 +886,7 @@ export default function POSScreen() {
                 </View>
               );
             })}
-          </ScrollView>
+          </View>
         )}
 
         {/* Moneda de factura y descuento. Los pagos se indican por separado para
@@ -918,8 +925,8 @@ export default function POSScreen() {
           )}
         </View>
 
-        <View style={{ maxHeight: 150, paddingHorizontal: 12, paddingTop: 6 }}>
-          <ScrollView nestedScrollEnabled keyboardShouldPersistTaps="handled">
+        <View style={{ paddingHorizontal: 12, paddingTop: 6 }}>
+          <View>
             {paymentLines.map((line, index) => {
               const methods = PAYMENT_METHODS_BY_CURRENCY[line.currency] || [];
               const same = line.currency === saleCurrency;
@@ -988,7 +995,7 @@ export default function POSScreen() {
                 </View>
               );
             })}
-          </ScrollView>
+          </View>
           <TouchableOpacity disabled={paymentLines.length >= 8} onPress={() => {
             const first = paymentLines[0];
             setPaymentLines((prev) => [...prev.map((p, i) => i === 0 && p.amount === '' ? { ...p, amount: String(total) } : p), {
@@ -1042,6 +1049,7 @@ export default function POSScreen() {
             </View>
           </View>
         </View>
+        </SelectOverlayProvider>
       </Modal>
     </View>
   );
@@ -1097,13 +1105,15 @@ const createStyles = () => StyleSheet.create({
   checkoutBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.success, paddingVertical: 10, paddingHorizontal: 20, borderRadius: 12 },
   checkoutText: { color: '#fff', fontWeight: '700', fontSize: 14 },
   checkoutOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.58)', alignItems: 'center', justifyContent: 'center', padding: 10 },
+  checkoutOverlayFull: { padding: 0, alignItems: 'stretch', justifyContent: 'flex-start' },
   checkoutModal: { width: '100%', maxWidth: 640, maxHeight: '96%', flex: 1, backgroundColor: colors.bg, borderRadius: 18, borderWidth: 1, borderColor: colors.border },
+  checkoutModalFull: { width: '100%', maxWidth: '100%', maxHeight: '100%', height: '100%', borderRadius: 0, borderWidth: 0 },
   checkoutHeader: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: colors.border, backgroundColor: colors.bgCard },
   checkoutTitle: { flex: 1, fontSize: 17, fontWeight: '800', color: colors.text },
   checkoutOfflineNotice: { paddingHorizontal: 14, paddingVertical: 8, backgroundColor: colors.warningBg, borderBottomWidth: 1, borderBottomColor: colors.warningBorder },
   checkoutOfflineText: { color: colors.warningTextDark, fontSize: 12, fontWeight: '600' },
-  checkoutScroll: { flex: 1, minHeight: 0 },
-  checkoutContent: { paddingTop: 12, paddingBottom: 6 },
+  checkoutScroll: { flex: 1, minHeight: 0, width: '100%' },
+  checkoutContent: { paddingTop: 12, paddingBottom: 12, flexGrow: 1 },
   checkoutFooter: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 12, borderTopWidth: 1, borderTopColor: colors.border, backgroundColor: colors.bgCard },
   checkoutFooterLabel: { color: colors.textMuted, fontSize: 11 },
   checkoutFooterTotal: { color: colors.text, fontSize: 17, fontWeight: '800', marginTop: 2 },

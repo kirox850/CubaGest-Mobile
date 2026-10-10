@@ -5,6 +5,7 @@ import { ClosingAPI, LocationsAPI, ProductsAPI } from '../api/endpoints';
 import { isOfflineError } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { colors, themeRef } from '../config/theme';
+import { CURRENCY_SYMBOLS } from '../config/roles';
 import { Badge, EmptyState, ErrorBanner, Skeleton, Btn, PageHeader, showToast } from '../components/UI';
 import DineroCierre, { countedCashDe, hayConteo, type ContadoTexto } from '../components/DineroCierre';
 import ClosingResolve from '../components/ClosingResolve';
@@ -191,13 +192,42 @@ export default function CierreCajaScreen() {
         clientClosingId,
         clientReadingId,
       };
+      let queuedOffline = false;
+      let serverClosing: Closing | null = null;
       try {
-        await ClosingAPI.confirm(request);
+        serverClosing = await ClosingAPI.confirm(request);
       } catch (error) {
         if (!isOfflineError(error)) throw error;
         await enqueueOfflineOperation('closing_confirm', request, Date.parse(countedAt), clientClosingId);
+        queuedOffline = true;
       }
-      showToast('Cierre registrado correctamente', 'success');
+
+      // La advertencia se basa en el resultado definitivo del servidor, no en
+      // el preview: entre abrirlo y confirmar pueden sincronizarse ventas o
+      // movimientos y cambiar la conciliación. Offline no se inventan faltantes;
+      // el backend los calcula cuando reciba esta operación y las ventas.
+      const shortageProducts = queuedOffline ? 0 : (serverClosing?.items || []).filter((item) =>
+        Number(item.shortage) > 0.001,
+      ).length;
+      const cashDifferences = Object.entries(queuedOffline ? {} : serverClosing?.cashDiff || {})
+        .filter(([, difference]) => Math.abs(Number(difference)) > 0.005);
+      const warnings: string[] = [];
+      if (shortageProducts > 0) warnings.push(`faltantes en ${shortageProducts} producto(s)`);
+      if (cashDifferences.length > 0) {
+        warnings.push(`descuadre de dinero: ${cashDifferences.map(([currency, difference]) => {
+          return `${difference < 0 ? 'faltan' : 'sobran'} ${fmt(Math.abs(difference))} ${currency}`;
+        }).join(', ')}`);
+      }
+      showToast(
+        queuedOffline
+          ? conDinero
+            ? 'Cierre guardado offline; faltantes y dinero contado se conciliarán al sincronizar.'
+            : 'Cierre guardado offline; faltantes pendientes de conciliación. No se registró conteo de dinero.'
+          : warnings.length > 0
+            ? `Cierre registrado con ${warnings.join('; ')}`
+            : 'Cierre registrado correctamente',
+        queuedOffline ? 'info' : warnings.length > 0 ? 'warning' : 'success',
+      );
       setView('list');
       setPreview(null);
       setNotes('');
@@ -403,6 +433,9 @@ export default function CierreCajaScreen() {
             ListEmptyComponent={<EmptyState icon="cierre" text="No hay cierres registrados aún" />}
             renderItem={({ item: c }) => {
               const hasShortage = (c.items || []).some((i) => i.shortage > 0.001);
+              const cashDifferences = Object.values(c.cashDiff || {}).map(Number);
+              const hasCashDifference = cashDifferences.some((difference) => Math.abs(difference) > 0.005);
+              const hasCashShortage = cashDifferences.some((difference) => difference < -0.005);
               return (
                 <TouchableOpacity
                   style={styles.card}
@@ -423,6 +456,7 @@ export default function CierreCajaScreen() {
                       {c.status === 'provisional' && <Badge icon="clock" label="Provisional" color={colors.warning} />}
                       {c.status === 'resuelto' && <Badge icon="check" label="Resuelto" color={colors.success} />}
                       {hasShortage && <Badge icon="alert" label="Faltantes" color={colors.warning} />}
+                      {hasCashDifference && <Badge icon="cash" label={hasCashShortage ? 'Falta dinero' : 'Sobra dinero'} color={colors.warning} />}
                       <Badge label={`${c.totalSales} ventas`} color={colors.primary} />
                     </View>
                   </View>
@@ -728,6 +762,12 @@ export default function CierreCajaScreen() {
     const c = detailClosing;
     const hasShortage = (c.items || []).some((i: ClosingItem) => i.shortage > 0.001);
     const provisional = c.status === 'provisional';
+    const expectedCash = c.expectedCash || {};
+    const countedCash = c.countedCash || {};
+    const savedCashDiff = c.cashDiff || {};
+    const cashCurrencies = [...new Set([
+      ...Object.keys(expectedCash), ...Object.keys(countedCash), ...Object.keys(savedCashDiff),
+    ])];
     return (
       <View style={styles.wrap}>
         <TouchableOpacity style={styles.backBtn} onPress={() => setView('list')}>
@@ -774,6 +814,39 @@ export default function CierreCajaScreen() {
             <Text style={[styles.detailValue, { color: colors.primary }]}>{c.totalSales}</Text>
           </View>
         </View>
+
+        {cashCurrencies.length > 0 && (
+          <View style={styles.cashSummary}>
+            <Text style={styles.cardTitle}>Conciliación del dinero</Text>
+            {cashCurrencies.map((currency) => {
+              const wasCounted = Object.prototype.hasOwnProperty.call(countedCash, currency);
+              const expected = Number(expectedCash[currency] || 0);
+              const counted = Number(countedCash[currency] || 0);
+              const difference = Object.prototype.hasOwnProperty.call(savedCashDiff, currency)
+                ? Number(savedCashDiff[currency] || 0)
+                : wasCounted ? counted - expected : 0;
+              const outOfBalance = wasCounted && Math.abs(difference) > 0.005;
+              const differenceLabel = !wasCounted
+                ? 'No contado'
+                : Math.abs(difference) <= 0.005
+                  ? 'Cuadrado'
+                  : (difference < 0 ? 'Faltan ' : 'Sobran ') + (CURRENCY_SYMBOLS[currency] || '') + fmt(Math.abs(difference)) + ' ' + currency;
+              return (
+                <View key={currency} style={styles.cashSummaryRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.statLabel}>{currency}</Text>
+                    <Text style={styles.cardSub}>
+                      {'Esperado ' + (CURRENCY_SYMBOLS[currency] || '') + fmt(expected) + ' · Contado ' + (wasCounted ? (CURRENCY_SYMBOLS[currency] || '') + fmt(counted) : '—')}
+                    </Text>
+                  </View>
+                  <Text style={[styles.cashSummaryDifference, { color: outOfBalance ? colors.warningText : colors.successText }]}>
+                    {differenceLabel}
+                  </Text>
+                </View>
+              );
+            })}
+          </View>
+        )}
 
         {/* Un cierre provisional no está cerrado: hay un plazo para explicar el
             descuadre. Sin esta banda, un cajero que abre el cierre ve una lista
@@ -869,6 +942,9 @@ const createStyles = () => StyleSheet.create({
   detailGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginVertical: 10 },
   detailCard: { flexGrow: 1, minWidth: '45%', backgroundColor: colors.bgCard, borderRadius: 12, borderWidth: 1, borderColor: colors.border, padding: 12 },
   detailValue: { fontSize: 17, fontWeight: '800', color: colors.text, marginTop: 4 },
+  cashSummary: { backgroundColor: colors.bgCard, borderWidth: 1, borderColor: colors.border, borderRadius: 14, padding: 12, gap: 8, marginHorizontal: 12, marginBottom: 10 },
+  cashSummaryRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 6, borderTopWidth: 1, borderTopColor: colors.borderLight },
+  cashSummaryDifference: { fontSize: 12, fontWeight: '700', textAlign: 'right', maxWidth: '48%' },
   modalBg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 24 },
   modalCard: { backgroundColor: colors.bgCard, borderRadius: 14, padding: 20, maxHeight: '85%' },
   modalTitle: { fontWeight: '800', fontSize: 16, marginBottom: 12, color: colors.text },

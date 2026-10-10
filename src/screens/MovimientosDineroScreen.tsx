@@ -15,7 +15,7 @@
 // NOMBRE de quien registró, no su id, así que el cliente no puede saberlo. Ese
 // filtro lo aplica el servidor con un 403, y el mensaje se muestra tal cual.
 
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { View, Text, StyleSheet, FlatList, Pressable, TouchableOpacity } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { CashMovementsAPI, LocationsAPI } from '../api/endpoints';
@@ -53,7 +53,7 @@ const ESTADO_LABEL: Record<string, string> = {
   rechazada: 'Rechazada',
 };
 
-export default function MovimientosDineroScreen() {
+export default function MovimientosDineroScreen({ navigation, route }: any) {
   const { user } = useAuth();
   const { shift } = useShift(user?.id);
 
@@ -71,6 +71,14 @@ export default function MovimientosDineroScreen() {
   const [motivo, setMotivo] = useState('');
   const [moneda, setMoneda] = useState('CUP');
   const [cajaId, setCajaId] = useState('');
+
+  // Contabilidad ofrece un atajo directo al formulario de retiro; se limpia
+  // el parámetro para que volver a esta pestaña no reabra el formulario.
+  useEffect(() => {
+    if (!route?.params?.openNew) return;
+    setModo('new');
+    navigation?.setParams?.({ openNew: false });
+  }, [navigation, route?.params?.openNew]);
 
   const cargar = useCallback(async () => {
     try {

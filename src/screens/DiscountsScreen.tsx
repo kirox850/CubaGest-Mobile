@@ -19,24 +19,50 @@ const emptyForm = {
   maxUses: '', locationScope: 'todas', locationIds: [] as string[], active: true,
 };
 
+function asRows(value: any): any[] | null {
+  if (Array.isArray(value)) return value;
+  if (Array.isArray(value?.items)) return value.items;
+  if (Array.isArray(value?.discounts)) return value.discounts;
+  return null;
+}
+
 export default function DiscountsScreen({ embedded = false }: { embedded?: boolean }) {
   const [list, setList] = useState<any[]>([]);
   const [locs, setLocs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [locationsError, setLocationsError] = useState('');
   const [form, setForm] = useState({ ...emptyForm });
 
   const load = useCallback(async () => {
     setLoading(true);
     setError('');
-    try {
-      const [d, l] = await Promise.all([DiscountsAPI.list(), LocationsAPI.list()]);
-      setList(d || []);
-      setLocs(l || []);
-    } catch (e) {
-      setError((e as Error).message);
-    } finally { setLoading(false); }
+    const [discountResult, locationResult] = await Promise.allSettled([
+      DiscountsAPI.list(),
+      LocationsAPI.list(),
+    ]);
+
+    const errors: string[] = [];
+    if (discountResult.status === 'fulfilled') {
+      const rows = asRows(discountResult.value);
+      if (rows) setList(rows);
+      else errors.push('El servidor devolvió una lista de descuentos con formato inesperado.');
+    } else {
+      errors.push((discountResult.reason as Error)?.message || 'No se pudieron cargar los descuentos.');
+    }
+
+    // La lista de descuentos no depende de que se carguen las ubicaciones.
+    // Antes un fallo de /locations hacía fallar Promise.all y dejaba vacía
+    // también la lista que sí había respondido.
+    if (locationResult.status === 'fulfilled') {
+      const rows = asRows(locationResult.value);
+      if (rows) { setLocs(rows); setLocationsError(''); }
+      else setLocationsError('El servidor devolvió las ubicaciones con un formato inesperado.');
+    } else setLocationsError((locationResult.reason as Error)?.message || 'No se pudieron cargar las ubicaciones.');
+
+    setError(errors.join(' · '));
+    setLoading(false);
   }, []);
   // Ver components/Recarga.tsx: la recarga se delega a un hijo, porque
   // `useFocusEffect` exige un NavigationContainer encima y embebida en
@@ -158,7 +184,7 @@ export default function DiscountsScreen({ embedded = false }: { embedded?: boole
 
           {form.locationScope === 'seleccion' && (
             <View style={styles.locWrap}>
-              {locs.length === 0 && <Text style={styles.locEmpty}>No hay ubicaciones registradas</Text>}
+              {locs.length === 0 && <Text style={styles.locEmpty}>{locationsError || 'No hay ubicaciones registradas'}</Text>}
               {locs.map((l: any) => {
                 const on = form.locationIds.includes(l.id);
                 return (
@@ -288,4 +314,3 @@ const styles = new Proxy({} as ReturnType<typeof createStyles>, {
     return __styles[prop as keyof ReturnType<typeof createStyles>];
   },
 });
-

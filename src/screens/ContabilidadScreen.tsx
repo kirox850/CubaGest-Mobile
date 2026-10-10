@@ -1,11 +1,11 @@
 import React, { useCallback, useState } from 'react';
 import { View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, Modal, ScrollView } from 'react-native';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { AccountingAPI, ExpensesAPI } from '../api/endpoints';
 import { useAuth } from '../context/AuthContext';
 import { colors, themeRef } from '../config/theme';
 import { PAY_METHODS, EXPENSE_CATS, CURRENCIES, CURRENCY_SYMBOLS } from '../config/roles';
-import { EmptyState, ErrorBanner, Badge, Btn, Inp, Sel, PageHeader, Skeleton, SkeletonRows } from '../components/UI';
+import { EmptyState, ErrorBanner, Badge, Btn, Inp, Sel, PageHeader, Skeleton, SkeletonRows, SelectOverlayProvider, closeSelectOverlayIfOpen } from '../components/UI';
 import Icon from '../components/Icon';
 import { shareCSV } from '../utils/csv';
 import type { AccountingSummary, IncomeRow, Expense } from '../types';
@@ -19,6 +19,7 @@ const today = () => new Date().toISOString().split('T')[0];
 
 export default function ContabilidadScreen() {
   const { online } = useAuth();
+  const navigation = useNavigation<any>();
   const [income, setIncome] = useState<IncomeRow[]>([]);
   const [summary, setSummary] = useState<AccountingSummary | null>(null);
   const [expenses, setExpenses] = useState<Expense[]>([]);
@@ -150,12 +151,13 @@ export default function ContabilidadScreen() {
       <>
       <ErrorBanner message={error} />
 
-      {/* Header — igual que la web: título + botones Actualizar/Informe/Gasto */}
+      {/* Header — accesos directos a gasto y retiro de caja, ambos movimientos distintos. */}
       <View style={styles.header}>
         <PageHeader title="Contabilidad" subtitle="Registro contable" />
         <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
           <Btn variant="secondary" icon="refresh" label="Actualizar" onPress={load} />
           <Btn variant="secondary" icon="print" label="Informe Fiscal" onPress={() => setShowInforme(true)} />
+          <Btn variant="secondary" icon="cash" label="Retirar de caja" onPress={() => navigation.navigate('Entradas y Salidas', { openNew: true })} />
           <Btn icon="plus" label="Registrar gasto de empresa" onPress={() => setModal(true)} />
         </View>
       </View>
@@ -269,7 +271,10 @@ export default function ContabilidadScreen() {
       )}
 
       {modal && (
-        <Modal visible animationType="slide" transparent onRequestClose={() => setModal(false)}>
+        <Modal visible animationType="slide" transparent onRequestClose={() => {
+          if (!closeSelectOverlayIfOpen()) setModal(false);
+        }}>
+          <SelectOverlayProvider>
           <View style={styles.modalBg}>
             <View style={styles.modalCard}>
               <Text style={styles.modalTitle}>Registrar gasto de empresa</Text>
@@ -313,6 +318,7 @@ export default function ContabilidadScreen() {
               </View>
             </View>
           </View>
+          </SelectOverlayProvider>
         </Modal>
       )}
       </>

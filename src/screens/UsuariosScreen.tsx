@@ -4,7 +4,7 @@ import { View, Text, StyleSheet, FlatList, Modal, Share } from 'react-native';
 import { UsersAPI, type UserActivation } from '../api/endpoints';
 import { ROLES } from '../config/roles';
 import { colors, themeRef } from '../config/theme';
-import { Badge, EmptyState, ErrorBanner, Btn, Inp, Sel, showToast, SkeletonRows } from '../components/UI';
+import { Badge, EmptyState, ErrorBanner, Btn, Inp, Sel, showToast, SkeletonRows, SelectOverlayProvider, closeSelectOverlayIfOpen } from '../components/UI';
 import { showAlert, showConfirm, showError } from '../components/dialogs';
 import Icon from '../components/Icon';
 import type { User } from '../types';
@@ -172,7 +172,10 @@ export default function UsuariosScreen({ embedded = false }: { embedded?: boolea
       )}
 
       {/* Modal crear/editar — mismos campos que la web */}
-      <Modal visible={modal} transparent animationType="fade" onRequestClose={() => setModal(false)}>
+      <Modal visible={modal} transparent animationType="fade" onRequestClose={() => {
+        if (!closeSelectOverlayIfOpen()) setModal(false);
+      }}>
+        <SelectOverlayProvider>
         <View style={styles.modalBg}>
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>{editTarget ? 'Editar Usuario' : 'Nuevo Usuario'}</Text>
@@ -212,6 +215,7 @@ export default function UsuariosScreen({ embedded = false }: { embedded?: boolea
             </View>
           </View>
         </View>
+        </SelectOverlayProvider>
       </Modal>
 
       {/* Modal link para establecer contraseña (setPasswordUrl / emailSent) */}
@@ -275,4 +279,3 @@ export const styles = new Proxy({} as ReturnType<typeof createStyles>, {
     return __styles[prop as keyof ReturnType<typeof createStyles>];
   },
 });
-

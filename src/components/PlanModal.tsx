@@ -39,22 +39,36 @@ interface PlanModalProps {
 export default function PlanModal({ visible, onClose, user, embedded = false }: PlanModalProps) {
   const [planInfo, setPlanInfo] = useState<PlanInfo | null>(null);
   const [loading, setLoading] = useState(false);
+  const [loadingPlanInfo, setLoadingPlanInfo] = useState(false);
+  const [planError, setPlanError] = useState('');
   const [selectedPlan, setSelectedPlan] = useState<string | null>(null);
   const [cancelando, setCancelando] = useState(false);
   const [estado, setEstado] = useState<SubscriptionStatus | null>(null);
 
-  const load = () => PlanAPI.get().then(setPlanInfo).catch(() => {});
+  const load = async () => {
+    setLoadingPlanInfo(true);
+    setPlanError('');
+    try {
+      setPlanInfo(await PlanAPI.get());
+    } catch (error) {
+      setPlanError((error as Error)?.message || 'No se pudo cargar la información del plan.');
+    } finally {
+      setLoadingPlanInfo(false);
+    }
+  };
   // El estado de la suscripción NO se deduce de `user.company`. Ese objeto
   // viene de la sesión cacheada en el dispositivo y se refresca al revalidar
   // al arrancar, así que puede llevar horas diciendo que no hay nada cancelado
   // después de que el dueño cancelara desde el navegador. `GET
   // /subscription/status` es la verdad y se pide cada vez que se abre el modal:
   // es una petición barata y la respuesta decide si se ofrece cancelar.
-  const loadEstado = () => SubscriptionAPI.status().then(setEstado).catch(() => {});
+  const loadEstado = async () => {
+    try { setEstado(await SubscriptionAPI.status()); } catch { /* se usa el estado de la sesión como respaldo */ }
+  };
 
   useEffect(() => {
-    if (visible) { load(); loadEstado(); }
-  }, [visible]);
+    if (embedded || visible) { void load(); void loadEstado(); }
+  }, [visible, embedded, user?.id]);
 
   const effectivePlan = planInfo?.plan || user?.company?.plan || 'free';
   const subStatus = planInfo?.subscriptionStatus || estado?.subscriptionStatus || user?.company?.subscriptionStatus;
@@ -137,8 +151,8 @@ export default function PlanModal({ visible, onClose, user, embedded = false }: 
   // pestaña de Configuración el `Modal` propio sería un modal dentro de un
   // modal, que en Android es exactamente el caso que se rompe.
   const contenido = (
-      <View style={styles.overlay}>
-        <View style={styles.card}>
+      <View style={[styles.overlay, embedded && styles.embeddedOverlay]}>
+        <View style={[styles.card, embedded && styles.embeddedCard]}>
           <View style={styles.header}>
             <Text style={styles.title}>Planes — CubaGest</Text>
             <TouchableOpacity onPress={onClose} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
@@ -146,7 +160,14 @@ export default function PlanModal({ visible, onClose, user, embedded = false }: 
             </TouchableOpacity>
           </View>
 
-          <ScrollView style={styles.body} contentContainerStyle={{ paddingBottom: 8 }}>
+          <ScrollView style={[styles.body, embedded && styles.embeddedBody]} contentContainerStyle={{ paddingBottom: 8 }}>
+            {loadingPlanInfo && <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 12 }}>
+              <ActivityIndicator size="small" color={colors.primary} />
+              <Text style={{ color: colors.textMuted, fontSize: 12 }}>Cargando información del plan…</Text>
+            </View>}
+            {!!planError && <View style={{ borderWidth: 1, borderColor: colors.warningBorder, backgroundColor: colors.warningBg, borderRadius: 10, padding: 10, marginBottom: 12 }}>
+              <Text style={{ color: colors.warningText, fontSize: 12 }}>{planError} Se muestran los datos disponibles en el dispositivo.</Text>
+            </View>}
             {isTrial && daysLeft !== null && (
               <View style={[styles.banner, { backgroundColor: daysLeft <= 7 ? colors.warningBg : colors.primaryTint, borderColor: daysLeft <= 7 ? colors.warningBorder : colors.primaryTintB }]}>
                 <Text style={[styles.bannerTitle, { color: daysLeft <= 7 ? colors.warningText : colors.primaryText }]}>
@@ -279,13 +300,13 @@ export default function PlanModal({ visible, onClose, user, embedded = false }: 
       </View>
     );
 
-    if (embedded) return <View>{contenido}</View>;
+    if (embedded) return <View style={{ flex: 1 }}>{contenido}</View>;
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
 
-      <View style={styles.overlay}>
-        <View style={styles.card}>
+      <View style={[styles.overlay, embedded && styles.embeddedOverlay]}>
+        <View style={[styles.card, embedded && styles.embeddedCard]}>
           <View style={styles.header}>
             <Text style={styles.title}>Planes — CubaGest</Text>
             <TouchableOpacity onPress={onClose} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
@@ -293,7 +314,14 @@ export default function PlanModal({ visible, onClose, user, embedded = false }: 
             </TouchableOpacity>
           </View>
 
-          <ScrollView style={styles.body} contentContainerStyle={{ paddingBottom: 8 }}>
+          <ScrollView style={[styles.body, embedded && styles.embeddedBody]} contentContainerStyle={{ paddingBottom: 8 }}>
+            {loadingPlanInfo && <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 12 }}>
+              <ActivityIndicator size="small" color={colors.primary} />
+              <Text style={{ color: colors.textMuted, fontSize: 12 }}>Cargando información del plan…</Text>
+            </View>}
+            {!!planError && <View style={{ borderWidth: 1, borderColor: colors.warningBorder, backgroundColor: colors.warningBg, borderRadius: 10, padding: 10, marginBottom: 12 }}>
+              <Text style={{ color: colors.warningText, fontSize: 12 }}>{planError} Se muestran los datos disponibles en el dispositivo.</Text>
+            </View>}
             {isTrial && daysLeft !== null && (
               <View style={[styles.banner, { backgroundColor: daysLeft <= 7 ? colors.warningBg : colors.primaryTint, borderColor: daysLeft <= 7 ? colors.warningBorder : colors.primaryTintB }]}>
                 <Text style={[styles.bannerTitle, { color: daysLeft <= 7 ? colors.warningText : colors.primaryText }]}>
@@ -430,11 +458,14 @@ export default function PlanModal({ visible, onClose, user, embedded = false }: 
 
 const createStyles = () => StyleSheet.create({
   overlay: { flex: 1, backgroundColor: 'rgba(15,23,42,0.45)', alignItems: 'center', justifyContent: 'center', padding: 16 },
+  embeddedOverlay: { alignItems: 'stretch', justifyContent: 'flex-start', padding: 0, backgroundColor: 'transparent' },
   card: { backgroundColor: colors.bgCard, borderRadius: radius.xl, width: '100%', maxHeight: '88%', overflow: 'hidden' },
+  embeddedCard: { flex: 1, maxHeight: '100%', borderRadius: radius.xl },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: colors.border },
   title: { fontSize: 16, fontWeight: '800', color: colors.text },
   closeIcon: { fontSize: 18, color: colors.textMuted },
   body: { paddingHorizontal: 16, paddingVertical: 14 },
+  embeddedBody: { flex: 1 },
   footer: { paddingHorizontal: 20, paddingVertical: 12, borderTopWidth: 1, borderTopColor: colors.border },
   closeBtn: { backgroundColor: colors.bgSecondary, borderRadius: radius.md, paddingVertical: 12, alignItems: 'center' },
   closeBtnText: { color: colors.textSecondary, fontWeight: '700', fontSize: 14 },
@@ -488,4 +519,3 @@ export const styles = new Proxy({} as ReturnType<typeof createStyles>, {
     return __styles[prop as keyof ReturnType<typeof createStyles>];
   },
 });
-

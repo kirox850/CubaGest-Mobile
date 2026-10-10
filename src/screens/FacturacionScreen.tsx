@@ -6,7 +6,7 @@ import { useAuth } from '../context/AuthContext';
 import { useSync } from '../context/SyncContext';
 import { colors, themeRef } from '../config/theme';
 import { PAY_METHODS, CURRENCY_SYMBOLS } from '../config/roles';
-import { EmptyState, ErrorBanner, Badge, Btn, Inp, Sel, Skeleton, showToast } from '../components/UI';
+import { EmptyState, ErrorBanner, Badge, Btn, Inp, Sel, Skeleton, showToast, SelectOverlayProvider, closeSelectOverlayIfOpen } from '../components/UI';
 import { showConfirm, showError } from '../components/dialogs';
 import Icon from '../components/Icon';
 import { shareCSV } from '../utils/csv';
@@ -389,7 +389,10 @@ export default function FacturacionScreen() {
 
       {/* Modal editar */}
       {editModal && (
-        <Modal visible animationType="slide" transparent onRequestClose={() => setEditModal(false)}>
+        <Modal visible animationType="slide" transparent onRequestClose={() => {
+          if (!closeSelectOverlayIfOpen()) setEditModal(false);
+        }}>
+          <SelectOverlayProvider>
           <View style={styles.modalBg}>
             <View style={styles.modalCard}>
               <Text style={styles.modalTitle}>Editar datos de factura</Text>
@@ -414,6 +417,7 @@ export default function FacturacionScreen() {
               </View>
             </View>
           </View>
+          </SelectOverlayProvider>
         </Modal>
       )}
     </View>

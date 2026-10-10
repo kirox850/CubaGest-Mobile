@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, Modal, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, Modal, ScrollView, KeyboardAvoidingView, Platform, useWindowDimensions } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { ProductsAPI, LocationsAPI } from '../api/endpoints';
 import { useAuth } from '../context/AuthContext';
@@ -10,6 +10,7 @@ import { showConfirm, showError } from '../components/dialogs';
 import Icon from '../components/Icon';
 import { shareCSV } from '../utils/csv';
 import { cacheProducts, getOfflineProducts, cacheLocations, getOfflineLocations } from '../offline/offlineStore';
+import { activateNamespace } from '../offline/namespace';
 import type { OfflineProduct } from '../offline/offlineStore';
 import type { Location, LocationStockItem, Product } from '../types';
 
@@ -28,6 +29,8 @@ const EMPTY_PRODUCT = {
 
 export default function InventarioScreen() {
   const { user } = useAuth();
+  const { width: screenWidth } = useWindowDimensions();
+  const compactLayout = screenWidth < 720;
   const canManage = CAN_MANAGE_INVENTORY.includes(user?.role || '');
   const isAdmin = user?.role === 'admin';
 
@@ -107,16 +110,19 @@ export default function InventarioScreen() {
     try {
       setError('');
       setLoading(true);
+      // El catálogo/stock offline está separado por ubicación. Cambia al
+      // namespace de la selección antes de leer o escribirlo.
+      if (user) await activateNamespace(user, selectedLocId);
       const { items } = await LocationsAPI.stock(selectedLocId);
       setProducts(items);
-      // Cache offline: guardamos el stock de la ubicación operativa del
-      // usuario (cajero/almacenista), igual que hace la web para el POS.
-      // Va al namespace de ESA ubicación, no al de otra caja.
-      if (user?.role !== 'admin') await cacheProducts(items, selectedLocId);
+      // También se cachea para administradores: el stock de cada ubicación
+      // queda aislado en su propio namespace, por lo que no se mezclan cajas.
+      await cacheProducts(items, selectedLocId);
       setLoading(false);
     } catch (err) {
       // Sin red se muestra el catálogo cacheado de ESA ubicación. El stock de
       // una caja no es el de otra: solo se pinta el de la caja activa.
+      if (user) await activateNamespace(user, selectedLocId).catch(() => {});
       const local = await getOfflineProducts();
       if (local.length > 0) {
         setProducts(local.map(desdeCache));
@@ -126,7 +132,7 @@ export default function InventarioScreen() {
       }
       setLoading(false);
     }
-  }, [selectedLocId, user?.role]);
+  }, [selectedLocId, user]);
 
   useFocusEffect(
     useCallback(() => {
@@ -196,6 +202,18 @@ export default function InventarioScreen() {
     setProductModal(true);
   };
 
+  const headerActions = (
+    <>
+      <Btn variant="secondary" icon="refresh" label="Actualizar" onPress={load} />
+      <Btn variant="secondary" icon="doc" label="CSV" onPress={() => shareCSV('inventario', products as any, [
+        { key: 'code', label: 'Código' }, { key: 'name', label: 'Producto' }, { key: 'category', label: 'Categoría' },
+        { key: 'unit', label: 'Unidad' }, { key: 'price', label: 'Precio' }, { key: 'currency', label: 'Moneda' },
+        { key: 'stock', label: 'Stock' }, { key: 'minStock', label: 'Mínimo' },
+      ])} />
+      {canManage && <Btn icon="plus" label="Nuevo Producto" onPress={openCreate} />}
+    </>
+  );
+
   const saveProduct = async () => {
     if (!form.code.trim() || !form.name.trim() || !form.price) {
       showError('Campos requeridos: ' + 'Codigo, nombre y precio son obligatorios.');
@@ -258,24 +276,22 @@ export default function InventarioScreen() {
   };
 
   return (
-    <View style={styles.wrap}>
+    <View style={[styles.wrap, compactLayout && styles.wrapCompact]}>
       {/* Header — igual que la web: título 22/800 + contador + botones */}
-      <View style={styles.header}>
+      <View style={[styles.header, compactLayout && styles.headerCompact]}>
         <View style={{ flexShrink: 1 }}>
           <Text style={styles.title}>Inventario</Text>
           <Text style={styles.subtitle}>
             {products.filter((p: any) => p.active !== false).length} productos
           </Text>
         </View>
-        <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-          <Btn variant="secondary" icon="refresh" label="Actualizar" onPress={load} />
-          <Btn variant="secondary" icon="doc" label="CSV" onPress={() => shareCSV('inventario', products as any, [
-            { key: 'code', label: 'Código' }, { key: 'name', label: 'Producto' }, { key: 'category', label: 'Categoría' },
-            { key: 'unit', label: 'Unidad' }, { key: 'price', label: 'Precio' }, { key: 'currency', label: 'Moneda' },
-            { key: 'stock', label: 'Stock' }, { key: 'minStock', label: 'Mínimo' },
-          ])} />
-          {canManage && <Btn icon="plus" label="Nuevo Producto" onPress={openCreate} />}
-        </View>
+        {compactLayout ? (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+            <View style={{ flexDirection: 'row', gap: 8, paddingRight: 4 }}>{headerActions}</View>
+          </ScrollView>
+        ) : (
+          <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>{headerActions}</View>
+        )}
       </View>
 
       {/* Selector de ubicación (solo admin) — chips compactos con icono,
@@ -306,8 +322,8 @@ export default function InventarioScreen() {
       <ErrorBanner message={error} />
 
       {/* Buscador con icono + filtro de categoría (igual que la web) */}
-      <View style={{ flexDirection: 'row', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
-        <View style={{ flex: 1, minWidth: 200, justifyContent: 'center' }}>
+      <View style={[styles.searchRow, compactLayout && styles.searchRowCompact]}>
+        <View style={{ flex: 1, minWidth: compactLayout ? 0 : 200, justifyContent: 'center' }}>
           <View style={{ position: 'absolute', left: 10, zIndex: 1 }}>
             <Icon name="search" size={15} color={colors.textMuted} />
           </View>
@@ -319,7 +335,7 @@ export default function InventarioScreen() {
           />
         </View>
         <Sel
-          style={{ width: 150 }}
+          style={{ width: compactLayout ? 112 : 150 }}
           value={filterCat}
           onValueChange={setFilterCat}
           items={cats.map((c) => ({ label: c, value: c }))}
@@ -327,6 +343,7 @@ export default function InventarioScreen() {
       </View>
 
       <FlatList
+        style={{ flex: 1 }}
         data={filtered}
         keyExtractor={(p) => p.id}
         contentContainerStyle={{ paddingBottom: 24 }}
@@ -563,12 +580,16 @@ export default function InventarioScreen() {
 
 const createStyles = () => StyleSheet.create({
   wrap: { flex: 1, backgroundColor: colors.bg, padding: 16 },
+  wrapCompact: { padding: 10 },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: 10,
   },
+  headerCompact: { flexDirection: 'column', alignItems: 'stretch', gap: 7, marginBottom: 7 },
+  searchRow: { flexDirection: 'row', gap: 12, flexWrap: 'wrap', marginBottom: 12 },
+  searchRowCompact: { flexWrap: 'nowrap', gap: 7, marginBottom: 8 },
   title: { fontSize: 22, fontWeight: '800', color: colors.text },
   addBtn: {
     backgroundColor: colors.primary,
@@ -689,4 +710,3 @@ export const styles = new Proxy({} as ReturnType<typeof createStyles>, {
     return __styles[prop as keyof ReturnType<typeof createStyles>];
   },
 });
-

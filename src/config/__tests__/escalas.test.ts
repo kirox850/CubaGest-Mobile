@@ -48,6 +48,9 @@ const TAMANOS = Object.values(type) as number[];
  * escala. Un radio de círculo es la mitad del lado, y la mitad de 22 es 11.
  */
 const CIRCULOS = /avatar|punto|signo|dot|usageBar/i;
+// Cero es válido para una superficie que ocupa toda la pantalla: no es un
+// radio de marca, sino la ausencia intencional de borde redondeado.
+const SIN_RADIO = /Full|fullBleed/i;
 const FUERA: { archivo: string; linea: number; valor: string }[] = [];
 
 for (const abs of tsx(RAIZ)) {
@@ -127,6 +130,7 @@ describe('la escala de radios', () => {
       for (const m of s.matchAll(/([a-zA-Z_]\w*):\s*\{[^}]*?borderRadius:\s*(\d+)/g)) {
         const [, nombre, vTxt] = m;
         const v = Number(vTxt);
+        if (v === 0 && SIN_RADIO.test(nombre)) continue;
         if (escala.includes(v)) continue;
         if (!CIRCULOS.test(nombre)) problemas.push(`${f.slice(RAIZ.length + 1)}: ${nombre}=${v}`);
       }

@@ -7,6 +7,7 @@ import { ThemeProvider, useTheme } from './context/ThemeContext';
 import { colors, NAVY } from './config/theme';
 import LoginScreen from './screens/LoginScreen';
 import AppNavigator from './navigation/AppNavigator';
+import { SelectOverlayProvider } from './components/UI';
 
 function Root() {
   const { user, loading } = useAuth();
@@ -30,7 +31,9 @@ export default function App() {
               y del estado online para disparar la sincronización automática. */}
           <SyncProvider>
             <StatusBar barStyle="light-content" backgroundColor={NAVY} />
-            <Root />
+            <SelectOverlayProvider>
+              <Root />
+            </SelectOverlayProvider>
           </SyncProvider>
         </AuthProvider>
       </ThemeProvider>

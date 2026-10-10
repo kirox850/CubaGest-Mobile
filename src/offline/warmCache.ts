@@ -36,7 +36,8 @@ import {
   SalesAPI, SettingsAPI, DiscountsAPI, ShiftAPI, TransfersAPI,
 } from '../api/endpoints';
 import { persistShift } from '../hooks/useShift';
-import type { User } from '../types';
+import { activateNamespace } from './namespace';
+import type { Location, User } from '../types';
 
 export interface WarmStep {
   nombre: string;
@@ -87,12 +88,16 @@ export async function warmCache(opts: WarmOpts): Promise<WarmResult> {
 
   if (!user) return { ok: 0, fallos: [], pasos };
 
+  let availableLocations: Location[] = [];
+  let assignedLocationIds: string[] = [];
+
   // ── 1. Ubicaciones ────────────────────────────────────────────────────────
   // Van primero porque de ellas sale la caja, y sin caja no hay stock que
   // guardar. Es también lo que hace que `sinCache` deje de estar activo en el
   // POS, que es el que dice "sin conexión y sin datos guardados".
   registrar(await paso('ubicaciones', async () => {
-    await cacheLocations(await LocationsAPI.list());
+    availableLocations = await LocationsAPI.list();
+    await cacheLocations(availableLocations);
   }));
 
   // ── 2. Turno y cajas asignadas ────────────────────────────────────────────
@@ -103,6 +108,9 @@ export async function warmCache(opts: WarmOpts): Promise<WarmResult> {
   registrar(await paso('turno', async () => {
     const resp = await ShiftAPI.current();
     shiftLocationId = resp?.shift?.locationId ?? null;
+    assignedLocationIds = (Array.isArray(resp?.assignedCajas) ? resp.assignedCajas : [])
+      .filter((location: any) => location?.active !== false && location?.id)
+      .map((location: any) => location.id);
     await persistShift(
       user.id,
       resp?.shift ?? null,
@@ -116,13 +124,42 @@ export async function warmCache(opts: WarmOpts): Promise<WarmResult> {
   // verdad se está vendiendo), luego la última conocida, y solo si no hay
   // ninguna de las dos se pide la primera caja activa. Es la misma precedencia
   // que `locationResolution.ts`, y usa la misma función para no divergir.
-  const caja = locationId || shiftLocationId || (await getLastLocationId()) || '';
-  if (caja) {
-    registrar(await paso('productos', async () => {
-      const { items } = await LocationsAPI.stock(caja);
-      await cacheProducts(items, caja);
+  const recordada = await getLastLocationId();
+  const tipoPreferido = user.role === 'almacenista' ? 'almacen' : 'caja';
+  const primeraOperativa = availableLocations.find((location) =>
+    location.active !== false && location.type === tipoPreferido,
+  )?.id || availableLocations.find((location) => location.active !== false)?.id || '';
+  // Un cajero con varias cajas y sin turno debe elegir; no convertir la primera
+  // asignada en una ubicación implícita, porque una venta offline allí sería
+  // difícil de reconciliar con la caja física. Para los demás roles se puede
+  // usar una ubicación operativa por defecto.
+  const caja = locationId || shiftLocationId || recordada || (
+    user.role === 'cajero'
+      ? assignedLocationIds.length === 1 ? assignedLocationIds[0] : ''
+      : assignedLocationIds[0] || primeraOperativa
+  );
+  const ubicacionesAdmin = availableLocations
+    .filter((location) => location.active !== false)
+    .map((location) => location.id);
+  const ubicacionesAcalentar = user.role === 'admin'
+    ? (ubicacionesAdmin.length > 0 ? ubicacionesAdmin : [caja].filter(Boolean))
+    : user.role === 'cajero' && assignedLocationIds.length > 0
+      ? assignedLocationIds
+      : [caja].filter(Boolean);
+
+  for (const stockLocationId of [...new Set(ubicacionesAcalentar)]) {
+    registrar(await paso(`productos:${stockLocationId}`, async () => {
+      // Cada catálogo se guarda bajo el namespace de SU ubicación. Sin esto,
+      // cacheProducts descarta silenciosamente el stock cuando el usuario aún
+      // estaba en "sin-ubicacion" o tenía activa otra caja.
+      await activateNamespace(user, stockLocationId);
+      const { items } = await LocationsAPI.stock(stockLocationId);
+      await cacheProducts(items, stockLocationId);
     }));
   }
+  // La siguiente pantalla empieza con el turno/caja real, no con la última
+  // ubicación del bucle de precarga.
+  await activateNamespace(user, caja || undefined);
 
   // ── 4. El resto, en paralelo. Son independientes entre sí. ────────────────
   const resto = await Promise.all([
